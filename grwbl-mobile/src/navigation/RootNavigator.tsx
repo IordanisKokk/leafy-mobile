@@ -1,23 +1,18 @@
-
-// src/navigation/RootNavigator.tsx
 import React from "react";
-import { SafeAreaView, StatusBar, StyleSheet } from "react-native";
-import HomeScreen from "../screens/HomeScreen";
+import { NavigationContainer } from "@react-navigation/native";
+import AuthStackNavigator from "./AuthStackNavigator";
+import MainTabNavigator from "./MainTabNavigator";
 
 const RootNavigator: React.FC = () => {
+  // For now, just hardcode this.
+  // Later this will come from context / async storage / API.
+  const isLoggedIn = true; // toggle to true to test the main tabs
+
   return (
-    <SafeAreaView style={styles.container}>
-      <StatusBar barStyle="light-content" />
-      <HomeScreen />
-    </SafeAreaView>
+    <NavigationContainer>
+      {isLoggedIn ? <MainTabNavigator /> : <AuthStackNavigator />}
+    </NavigationContainer>
   );
 };
-
-const styles = StyleSheet.create({
-  container: {
-    flex: 1,
-    backgroundColor: "#020617",
-  },
-});
 
 export default RootNavigator;
