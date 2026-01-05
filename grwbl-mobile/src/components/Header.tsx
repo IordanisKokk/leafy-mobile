@@ -66,8 +66,8 @@ const Header: React.FC<HeaderProps> = ({
 
 const styles = StyleSheet.create({
   container: {
-    paddingTop: spacing.xxl,     // spacing from status bar (changed from xxxl)
-    paddingBottom: spacing.md,
+    paddingTop: spacing.xxxl,     // spacing from status bar (changed from xxxl)
+    paddingBottom: spacing.xs,
     paddingHorizontal: spacing.md,
     backgroundColor: colors.background,
     flexDirection: "row",

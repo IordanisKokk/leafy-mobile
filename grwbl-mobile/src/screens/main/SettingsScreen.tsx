@@ -3,8 +3,16 @@ import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, boxShadows } from "../../theme";
 import Header from "../../components/Header";
+import { useAuth } from "../../context/AuthContext";
 
 const SettingsScreen: React.FC = () => {
+
+  const { logout } = useAuth();
+
+  const handleLogoutPress = () => {
+    console.log("Logout pressed");
+    logout();
+  }
   return (
     <View style={styles.container}>
       <Header title="Settings" showBackButton={false} showLogo={true} hide={false} />
@@ -52,6 +60,18 @@ const SettingsScreen: React.FC = () => {
           </View>
           <Ionicons
             name="chevron-forward"
+            size={18}
+            color={colors.textMuted}
+          />
+        </TouchableOpacity>
+      </View>
+      <View style={[styles.section, {marginTop: spacing.xl}]}>
+        <TouchableOpacity style={styles.row} onPress={handleLogoutPress} activeOpacity={0.7}>
+          <View>
+            <Text style={styles.logoutLabel}>Log out</Text>
+          </View>
+          <Ionicons
+            name="log-out-outline"
             size={18}
             color={colors.textMuted}
           />
@@ -111,6 +131,11 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
     marginTop: 2,
   },
+  logoutLabel: {
+    fontSize: 15,
+    color: colors.error,
+    fontWeight: "500",
+  }
 });
 
 export default SettingsScreen;

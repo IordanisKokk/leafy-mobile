@@ -4,10 +4,12 @@ export const colors = {
   surface: "#fff",
   surfaceSoft: "#f1f1f1",
   primary: "#0e953fff", // green accent
-  primarySoft: "#168b41ff",
+  primarySoft: "#2cc263db",
   text: "#0b0b0bff",
   textMuted: "#525252ff",
   border: "#41414120",
+  error: "#f03e3eff",
+  buttonDisabled: "#dededeff",
 };
 
 export const spacing = {
@@ -17,7 +19,7 @@ export const spacing = {
   lg: 16,
   xl: 24,
   xxl: 32,
-  xxxl: 64
+  xxxl: 48
 };
 
 export const radius = {

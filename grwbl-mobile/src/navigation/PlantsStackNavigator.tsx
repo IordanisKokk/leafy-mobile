@@ -5,12 +5,13 @@ import PlantsListScreen from "../screens/plants/PlantsListScreen";
 import SelectSpeciesScreen from "../screens/plants/SelectSpeciesScreen";
 import PlantFormScreen from "../screens/plants/PlantFormScreen";
 import { colors, spacing, radius } from "../theme";
+import { Species } from "../api/species";
 
 
 export type PlantsStackParamList = {
   PlantsList: undefined;
   SelectSpecies: undefined;
-  PlantForm: { speciesName: string };
+  PlantForm: { species: Species };
 };
 
 const Stack = createNativeStackNavigator<PlantsStackParamList>();

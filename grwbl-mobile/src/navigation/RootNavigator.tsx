@@ -2,11 +2,11 @@ import React from "react";
 import { NavigationContainer } from "@react-navigation/native";
 import AuthStackNavigator from "./AuthStackNavigator";
 import MainTabNavigator from "./MainTabNavigator";
+import { useAuth } from "../context/AuthContext";
 
 const RootNavigator: React.FC = () => {
-  // For now, just hardcode this.
-  // Later this will come from context / async storage / API.
-  const isLoggedIn = true; // toggle to true to test the main tabs
+  const { token } = useAuth();
+  const isLoggedIn = !!token;
 
   return (
     <NavigationContainer>

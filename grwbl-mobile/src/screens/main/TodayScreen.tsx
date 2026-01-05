@@ -3,9 +3,17 @@ import React from "react";
 import { View, Text, StyleSheet, TouchableOpacity } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { colors, spacing, radius, boxShadows } from "../../theme";
+import { get } from "../../api/client";
 
 const TodayScreen: React.FC = () => {
   const hasPlants = false;
+
+type SpeciesFromApi = {
+  id: string;
+  commonName: string;
+  scientificName: string;
+
+};
 
   return (
     <View style={styles.container}>
@@ -77,7 +85,7 @@ const styles = StyleSheet.create({
   cardText: {
     fontSize: 14,
     color: colors.textMuted,
-  },
+  }
 });
 
 export default TodayScreen;
