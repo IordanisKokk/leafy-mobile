@@ -31,6 +31,7 @@ const SelectSpeciesScreen: React.FC<Props> = ({ navigation }) => {
         .catch(console.error)
         .finally(() => setLoading(false));
     }, 1000); // simulate delay
+    console.log("Fetched species:", species);
   }, []);
 
   const handleSelect = (species: Species) => {

@@ -4,14 +4,17 @@ import { createNativeStackNavigator } from "@react-navigation/native-stack";
 import PlantsListScreen from "../screens/plants/PlantsListScreen";
 import SelectSpeciesScreen from "../screens/plants/SelectSpeciesScreen";
 import PlantFormScreen from "../screens/plants/PlantFormScreen";
+import PlantDetailsScreen from "../screens/plants/PlantDetailsScreen";
 import { colors, spacing, radius } from "../theme";
 import { Species } from "../api/species";
+import { Plant } from "../api/plants";
 
 
 export type PlantsStackParamList = {
   PlantsList: undefined;
   SelectSpecies: undefined;
   PlantForm: { species: Species };
+  PlantDetails: { plant: Plant };
 };
 
 const Stack = createNativeStackNavigator<PlantsStackParamList>();
@@ -39,6 +42,11 @@ const PlantsStackNavigator: React.FC = () => {
         name="PlantForm"
         component={PlantFormScreen}
         options={{ title: "New plant" }}
+      />
+      <Stack.Screen
+        name="PlantDetails"
+        component={PlantDetailsScreen}
+        options={{ title: "Plant" }}
       />
     </Stack.Navigator>
   );
