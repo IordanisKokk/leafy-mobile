@@ -528,9 +528,9 @@ const styles = StyleSheet.create({
     zIndex: 1,
   },
   overviewTitle: {
-    fontSize: 13,
-    fontWeight: "700",
-    color: colors.text,
+    fontSize: 16,
+    fontWeight: "800",
+    color: colors.surface,
     marginBottom: spacing.sm,
   },
   overviewMetricsInline: {
@@ -560,13 +560,13 @@ const styles = StyleSheet.create({
   },
   overviewLabel: {
     fontSize: 11,
-    color: colors.textMuted,
+    color: colors.surface,
     fontWeight: "600",
   },
   overviewValue: {
     fontSize: 13,
     fontWeight: "800",
-    color: colors.text,
+    color: colors.surface,
   },
   overviewArt: {
     position: "absolute",
@@ -580,12 +580,12 @@ const styles = StyleSheet.create({
   },
   overviewBubbleLarge: {
     position: "absolute",
-    width: 110,
+    width: 130,
     height: 110,
-    borderRadius: 55,
+    borderRadius: 35,
     backgroundColor: "rgba(134, 251, 177, 0.41)",
-    top: -10,
-    right: 6,
+    top: 10,
+    right: -20,
   },
   overviewBubbleSmall: {
     position: "absolute",
@@ -594,7 +594,7 @@ const styles = StyleSheet.create({
     borderRadius: 35,
     backgroundColor: "rgba(46, 238, 116, 0.27)",
     top: 36,
-    right: 36,
+    right: 54,
   },
   segmentedControl: {
     flexDirection: "row",
