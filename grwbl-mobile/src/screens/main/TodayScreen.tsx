@@ -1,5 +1,15 @@
 import React from "react";
-import { View, Text, StyleSheet, TouchableOpacity, ActivityIndicator, ScrollView } from "react-native";
+import {
+  View,
+  Text,
+  StyleSheet,
+  TouchableOpacity,
+  ActivityIndicator,
+  ScrollView,
+  Pressable,
+  Modal,
+  Alert,
+} from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
 import Header from "../../components/Header";
@@ -11,6 +21,7 @@ import WateringCan from "../../../assets/watering-can/watering-can.svg";
 import { useNavigation } from "@react-navigation/native";
 import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { MainTabParamList } from "../../navigation/MainTabNavigator";
+import QuickActionsDock, { QuickAction } from "./components/QuickActionsDock";
 
 const startOfDay = (date: Date) => {
   const next = new Date(date);
@@ -50,6 +61,9 @@ const TodayScreen: React.FC = () => {
   const [plants, setPlants] = React.useState<Plant[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
   const [error, setError] = React.useState<string | null>(null);
+  const [isSnoozeModalVisible, setIsSnoozeModalVisible] = React.useState(false);
+  const [snoozeError, setSnoozeError] = React.useState<string | null>(null);
+  const [snoozedOffsets, setSnoozedOffsets] = React.useState<Record<string, number>>({});
 
   const auth = useAuth();
   const { showSnackbar } = useSnackbar();
@@ -80,10 +94,27 @@ const TodayScreen: React.FC = () => {
   }, [loadPlants]);
 
   const today = startOfDay(new Date());
+  const computeNextWateringDateForPlant = (plant: Plant): Date | null => {
+    const intervalDays = plant.wateringIntervalDays ?? plant.wateringFrequencyDays;
+    if (!intervalDays || intervalDays <= 0) return null;
+
+    const baseNextDate = computeNextWateringDate(plant);
+    const offsetDays = snoozedOffsets[plant.id] ?? 0;
+
+    if (baseNextDate) {
+      return offsetDays > 0 ? addDays(baseNextDate, offsetDays) : baseNextDate;
+    }
+
+    if (offsetDays > 0) {
+      return addDays(today, offsetDays);
+    }
+
+    return null;
+  };
   const dueTasks = plants.filter((plant) => {
     const intervalDays = plant.wateringIntervalDays ?? plant.wateringFrequencyDays;
     if (!intervalDays || intervalDays <= 0) return false;
-    const nextDate = computeNextWateringDate(plant);
+    const nextDate = computeNextWateringDateForPlant(plant);
     if (!nextDate) return true;
     return nextDate <= today;
   });
@@ -92,12 +123,12 @@ const TodayScreen: React.FC = () => {
   const remainingTasks = Math.max(dueTasks.length - visibleTasks.length, 0);
 
   const dueTodayCount = plants.filter((plant) => {
-    const nextDate = computeNextWateringDate(plant);
+    const nextDate = computeNextWateringDateForPlant(plant);
     return nextDate ? isSameDay(nextDate, today) : false;
   }).length;
 
   const overdueCount = plants.filter((plant) => {
-    const nextDate = computeNextWateringDate(plant);
+    const nextDate = computeNextWateringDateForPlant(plant);
     return nextDate ? nextDate < today : false;
   }).length;
 
@@ -125,23 +156,12 @@ const TodayScreen: React.FC = () => {
     return streak;
   })();
 
-  const heroAccent = overdueCount > 0 ? colors.error : colors.primary;
-  const heroPalette = overdueCount > 0
-    ? todayTheme.hero.overdue
-    : dueTodayCount > 0
-      ? todayTheme.hero.due
-      : todayTheme.hero.neutral;
+  const heroPalette = todayTheme.hero.neutral;
   const heroGradientColors = heroPalette.gradient;
   const heroBubbleColors = heroPalette.bubbles;
   const heroBorderColor = heroPalette.border;
   const heroIconTint = todayTheme.hero.iconTint;
   const heroText = todayTheme.hero.text;
-  const summaryGradientColors = ["#2cc263", "#0e953f"];
-  const summaryStatGradients = {
-    due: ["#fbbf24", "#f97316"],
-    overdue: ["#fb7185", "#ef4444"],
-    total: ["#60a5fa", "#38bdf8"],
-  };
 
   const handleMarkWatered = (plant: Plant) => {
     console.log("Mark watered pressed for:", plant.id);
@@ -157,6 +177,122 @@ const TodayScreen: React.FC = () => {
       screen: "PlantDetails",
       params: { plant },
     });
+  };
+
+  const handleAddPlant = () => {
+    navigation.navigate("Plants", { screen: "SelectSpecies" });
+  };
+
+  const handleOpenReminders = () => {
+    navigation.navigate("Settings");
+  };
+
+  const handleOverflowActions = () => {
+    Alert.alert("More actions", "Choose an action", [
+      { text: "Reminders", onPress: handleOpenReminders },
+      { text: "Cancel", style: "cancel" },
+    ]);
+  };
+
+  const handleBulkWater = () => {
+    showSnackbar({
+      message: "Bulk watering mode coming soon.",
+      type: "info",
+      duration: 2000,
+    });
+  };
+
+  const openSnoozeModal = () => {
+    if (dueTasks.length === 0) {
+      return;
+    }
+    setSnoozeError(null);
+    setIsSnoozeModalVisible(true);
+  };
+
+  const closeSnoozeModal = () => {
+    setIsSnoozeModalVisible(false);
+  };
+
+  const formatSnoozeDate = (date: Date) =>
+    date.toLocaleDateString(undefined, {
+      month: "short",
+      day: "2-digit",
+      year: "numeric",
+    });
+
+  const applySnooze = (days: number) => {
+    if (dueTasks.length === 0) {
+      return;
+    }
+
+    try {
+      setSnoozeError(null);
+      const previousOffsets = { ...snoozedOffsets };
+      const nextOffsets = { ...snoozedOffsets };
+
+      dueTasks.forEach((plant) => {
+        nextOffsets[plant.id] = (nextOffsets[plant.id] ?? 0) + days;
+      });
+
+      setSnoozedOffsets(nextOffsets);
+      setIsSnoozeModalVisible(false);
+
+      const snoozeUntil = addDays(today, days);
+      showSnackbar({
+        message: `Snoozed until ${formatSnoozeDate(snoozeUntil)}`,
+        type: "success",
+        duration: 7000,
+        actionLabel: "Undo",
+        onAction: () => {
+          setSnoozedOffsets(previousOffsets);
+          showSnackbar({
+            message: "Snooze undone",
+            type: "info",
+            duration: 2000,
+          });
+        },
+      });
+    } catch (err) {
+      console.error("snooze failed:", err);
+      setSnoozeError("Couldn’t snooze tasks. Try again.");
+    }
+  };
+
+  const hasDueTasks = dueTasks.length > 0;
+  const dockActions: QuickAction[] = [
+    {
+      id: "add-plant",
+      label: "Add plant",
+      icon: "add-circle-outline",
+      onPress: handleAddPlant,
+    },
+    {
+      id: "bulk-water",
+      label: "Bulk water",
+      icon: "checkmark-done-outline",
+      onPress: handleBulkWater,
+      disabled: !hasDueTasks,
+    },
+    {
+      id: "snooze",
+      label: "Snooze",
+      icon: "time-outline",
+      onPress: openSnoozeModal,
+      disabled: !hasDueTasks,
+    },
+    {
+      id: "reminders",
+      label: "Reminders",
+      icon: "notifications-outline",
+      onPress: handleOpenReminders,
+    },
+  ];
+  const overflowAction: QuickAction = {
+    id: "more",
+    label: "More",
+    icon: "ellipsis-horizontal",
+    onPress: handleOverflowActions,
   };
 
   return (
@@ -189,7 +325,7 @@ const TodayScreen: React.FC = () => {
             <View style={styles.heroHeader}>
               <View style={styles.heroTitleRow}>
                 <Text style={styles.heroTitle}>Water today</Text>
-                <View style={[styles.heroCountPill, { backgroundColor: heroAccent }]}>
+                <View style={styles.heroCountPill}>
                   <Text style={styles.heroCount}>{dueTasks.length}</Text>
                 </View>
               </View>
@@ -222,70 +358,93 @@ const TodayScreen: React.FC = () => {
               <WateringCan width={96} height={96} fill={heroIconTint} style={styles.heroIcon} />
             </View>
 
+          </LinearGradient>
+
+          <View style={styles.taskSectionCard}>
+            <View style={styles.taskSectionHeader}>
+              <Text style={styles.taskSectionTitle}>Plants to water</Text>
+              <Text style={styles.taskSectionCount}>{dueTasks.length}</Text>
+            </View>
             {dueTasks.length === 0 ? (
-              <View style={styles.emptyState}>
-                <Text style={styles.emptyTitle}>Nothing needs water</Text>
-                <Text style={styles.emptyText}>Enjoy the calm — check in tomorrow.</Text>
+              <View style={styles.taskEmptyState}>
+                <Text style={styles.taskEmptyTitle}>Nothing needs water</Text>
+                <Text style={styles.taskEmptyText}>Enjoy the calm — check in tomorrow.</Text>
               </View>
             ) : (
               <View style={styles.taskList}>
-                {visibleTasks.map((plant) => {
-                  const nextDate = computeNextWateringDate(plant);
+                {visibleTasks.map((plant, index) => {
+                  const nextDate = computeNextWateringDateForPlant(plant);
                   const isOverdue = nextDate ? nextDate < today : false;
+                  const isDueToday = nextDate ? isSameDay(nextDate, today) : false;
                   const taskLabel = nextDate
-                    ? isSameDay(nextDate, today)
+                    ? isDueToday
                       ? "Due today"
                       : "Overdue"
                     : "Needs last watered";
+                  const statusColor = nextDate
+                    ? isOverdue
+                      ? colors.error
+                      : "#f59e0b"
+                    : colors.textMuted;
+                  const locationLabel = [plant.room, plant.location]
+                    .filter(Boolean)
+                    .join(" · ");
+                  const secondaryLabel =
+                    locationLabel ||
+                    plant.species?.commonName ||
+                    plant.species?.scientificName ||
+                    "Unknown location";
+                  const isLastRow = index === visibleTasks.length - 1 && remainingTasks === 0;
 
                   return (
                     <TouchableOpacity
                       key={plant.id}
-                      style={styles.taskRow}
+                      style={[
+                        styles.taskRow,
+                        { borderLeftColor: statusColor },
+                        isLastRow && styles.taskRowLast,
+                      ]}
                       onPress={() => handleOpenPlant(plant)}
                       activeOpacity={0.85}
                     >
                       <View style={styles.taskInfo}>
-                        <Text style={styles.taskName} numberOfLines={1}>
+                        <Text style={styles.taskName} numberOfLines={2}>
                           {plant.name}
+                        </Text>
+                        <Text style={styles.taskSubtitle} numberOfLines={1}>
+                          {secondaryLabel}
                         </Text>
                         <View style={styles.taskMetaRow}>
                           <View
-                            style={[
-                              styles.taskStatus,
-                              isOverdue
-                                ? styles.taskStatusOverdue
-                                : styles.taskStatusDue,
-                            ]}
-                          >
-                            <Text
-                              style={[
-                                styles.taskStatusText,
-                                isOverdue
-                                  ? styles.taskStatusTextOverdue
-                                  : styles.taskStatusTextDue,
-                              ]}
-                            >
-                              {taskLabel}
-                            </Text>
-                          </View>
+                            style={[styles.taskStatusDot, { backgroundColor: statusColor }]}
+                          />
+                          <Text style={[styles.taskStatusText, { color: statusColor }]}>
+                            {taskLabel}
+                          </Text>
                         </View>
                       </View>
                       <View style={styles.taskActions}>
-                        <TouchableOpacity
-                          style={styles.taskButton}
+                        <Pressable
                           onPress={(event) => {
                             event.stopPropagation();
                             handleMarkWatered(plant);
                           }}
+                          style={({ pressed }) => [
+                            styles.taskQuickAction,
+                            pressed && styles.taskQuickActionActive,
+                          ]}
+                          accessibilityRole="button"
+                          accessibilityLabel={`Mark ${plant.name} watered`}
+                          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
-                          <Text style={styles.taskButtonText}>Mark watered</Text>
-                        </TouchableOpacity>
-                        <Ionicons
-                          name="chevron-forward"
-                          size={18}
-                          color={colors.textMuted}
-                        />
+                          {({ pressed }) => (
+                            <Ionicons
+                              name="water-outline"
+                              size={16}
+                              color={pressed ? colors.background : colors.primary}
+                            />
+                          )}
+                        </Pressable>
                       </View>
                     </TouchableOpacity>
                   );
@@ -298,14 +457,16 @@ const TodayScreen: React.FC = () => {
                     }
                     accessibilityRole="button"
                   >
+                    <Ionicons name="water-outline" size={16} color={colors.primary} />
                     <Text style={styles.moreTasksText}>
                       +{remainingTasks} more plants to water
                     </Text>
+                    <Ionicons name="chevron-forward" size={16} color={colors.primary} />
                   </TouchableOpacity>
                 )}
               </View>
             )}
-          </LinearGradient>
+          </View>
 
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeaderRow}>
@@ -358,63 +519,56 @@ const TodayScreen: React.FC = () => {
             </View>
           </View>
 
-          <LinearGradient
-            colors={summaryGradientColors}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={[styles.sectionCard, styles.summaryCard]}
-          >
-            <View style={styles.summaryBubbleLarge} />
-            <View style={styles.summaryBubbleOverlap} />
-            <View style={styles.summaryBubbleMid} />
-            <View style={styles.summaryBubbleSmall} />
-            <View style={styles.summaryContent}>
-              <View style={styles.sectionHeaderRow}>
-                <Text style={[styles.sectionTitle, styles.summaryTitle]}>Summary</Text>
-                <Ionicons name="analytics-outline" size={18} color={colors.background} />
-              </View>
-              <View style={styles.statsRow}>
-                <LinearGradient
-                  colors={summaryStatGradients.due}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={[styles.statCard, styles.summaryStatCard]}
-                >
-                  <View style={[styles.summaryStatIconWrap, styles.summaryStatIconDue]}>
-                    <Ionicons name="calendar" size={16} color={colors.background} />
-                  </View>
-                  <Text style={styles.statValue}>{dueTodayCount}</Text>
-                  <Text style={styles.statLabel}>Due today</Text>
-                </LinearGradient>
-                <LinearGradient
-                  colors={summaryStatGradients.overdue}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={[styles.statCard, styles.summaryStatCard]}
-                >
-                  <View style={[styles.summaryStatIconWrap, styles.summaryStatIconOverdue]}>
-                    <Ionicons name="alert" size={16} color={colors.background} />
-                  </View>
-                  <Text style={styles.statValue}>{overdueCount}</Text>
-                  <Text style={styles.statLabel}>Overdue</Text>
-                </LinearGradient>
-                <LinearGradient
-                  colors={summaryStatGradients.total}
-                  start={{ x: 0, y: 0 }}
-                  end={{ x: 1, y: 1 }}
-                  style={[styles.statCard, styles.summaryStatCard]}
-                >
-                  <View style={[styles.summaryStatIconWrap, styles.summaryStatIconTotal]}>
-                    <Ionicons name="leaf" size={16} color={colors.background} />
-                  </View>
-                  <Text style={styles.statValue}>{plants.length}</Text>
-                  <Text style={styles.statLabel}>Total plants</Text>
-                </LinearGradient>
-              </View>
-            </View>
-          </LinearGradient>
+          <QuickActionsDock actions={dockActions} overflowAction={overflowAction} />
         </ScrollView>
       )}
+
+      <Modal
+        visible={isSnoozeModalVisible}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={closeSnoozeModal}
+      >
+        <Pressable style={styles.sheetBackdrop} onPress={closeSnoozeModal}>
+          <Pressable style={styles.sheetCard} onPress={() => {}}>
+            <View style={styles.sheetHeader}>
+              <View>
+                <Text style={styles.sheetTitle}>Snooze watering</Text>
+                <Text style={styles.sheetSubtitle}>Postpone all tasks due today</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.sheetClose}
+                onPress={closeSnoozeModal}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+              >
+                <Ionicons name="close" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <View style={styles.sheetList}>
+              <Pressable
+                onPress={() => applySnooze(1)}
+                style={({ pressed }) => [styles.sheetRow, pressed && styles.sheetRowPressed]}
+              >
+                <Text style={styles.sheetRowLabel}>Tomorrow</Text>
+              </Pressable>
+              <View style={styles.sheetDivider} />
+              <Pressable
+                onPress={() => applySnooze(2)}
+                style={({ pressed }) => [styles.sheetRow, pressed && styles.sheetRowPressed]}
+              >
+                <Text style={styles.sheetRowLabel}>In 2 days</Text>
+              </Pressable>
+            </View>
+            {snoozeError ? (
+              <Text style={styles.sheetError}>{snoozeError}</Text>
+            ) : null}
+          </Pressable>
+        </Pressable>
+      </Modal>
     </View>
   );
 };
@@ -502,7 +656,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.sm,
     paddingVertical: 4,
     borderRadius: radius.pill,
-    backgroundColor: colors.primary,
+    backgroundColor: "rgba(255,255,255,0.2)",
+    borderWidth: 1,
+    borderColor: "rgba(255,255,255,0.35)",
   },
   heroCount: {
     color: todayTheme.hero.text.primary,
@@ -580,54 +736,6 @@ const styles = StyleSheet.create({
     boxShadow: boxShadows.sm,
     marginBottom: spacing.md,
   },
-  summaryCard: {
-    backgroundColor: "transparent",
-    borderWidth: 0,
-    overflow: "hidden",
-  },
-  summaryContent: {
-    position: "relative",
-    zIndex: 1,
-  },
-  summaryBubbleLarge: {
-    position: "absolute",
-    width: 120,
-    height: 120,
-    borderRadius: 60,
-    backgroundColor: "rgba(255,255,255,0.18)",
-    top: -32,
-    right: -24,
-  },
-  summaryBubbleOverlap: {
-    position: "absolute",
-    width: 100,
-    height: 100,
-    borderRadius: 75,
-    backgroundColor: "rgba(255,255,255,0.14)",
-    top: 10,
-    right: 28,
-  },
-  summaryBubbleMid: {
-    position: "absolute",
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    backgroundColor: "rgba(255,255,255,0.14)",
-    top: 40,
-    right: 24,
-  },
-  summaryBubbleSmall: {
-    position: "absolute",
-    width: 60,
-    height: 60,
-    borderRadius: 30,
-    backgroundColor: "rgba(255,255,255,0.12)",
-    bottom: -16,
-    left: 20,
-  },
-  summaryTitle: {
-    color: colors.background,
-  },
   sectionHeaderRow: {
     flexDirection: "row",
     alignItems: "center",
@@ -653,39 +761,76 @@ const styles = StyleSheet.create({
     color: colors.primary,
     fontWeight: "700",
   },
-  emptyState: {
+  taskSectionCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    padding: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    boxShadow: boxShadows.sm,
+    marginBottom: spacing.md,
+  },
+  taskSectionHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    marginBottom: spacing.sm,
+  },
+  taskSectionTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  taskSectionCount: {
+    fontSize: 12,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
+  taskEmptyState: {
     gap: spacing.xs,
   },
-  emptyTitle: {
+  taskEmptyTitle: {
     fontSize: 15,
     fontWeight: "600",
-    color: todayTheme.hero.text.primary,
+    color: colors.text,
   },
-  emptyText: {
+  taskEmptyText: {
     fontSize: 13,
-    color: todayTheme.hero.text.secondary,
+    color: colors.textMuted,
   },
   taskList: {
-    gap: spacing.sm,
+    borderRadius: radius.md,
+    overflow: "hidden",
+    borderWidth: 1,
+    borderColor: colors.border,
   },
   moreTasksRow: {
+    flexDirection: "row",
     alignItems: "center",
-    paddingVertical: spacing.xs,
+    justifyContent: "center",
+    gap: spacing.xs,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    backgroundColor: colors.surfaceSoft,
   },
   moreTasksText: {
     fontSize: 12,
-    color: todayTheme.hero.text.muted,
+    color: colors.primary,
     fontWeight: "600",
   },
   taskRow: {
     flexDirection: "row",
-    alignItems: "center",
+    alignItems: "flex-start",
     justifyContent: "space-between",
     backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    boxShadow: boxShadows.sm,
-    zIndex: 2,
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    borderBottomWidth: 1,
+    borderBottomColor: colors.border,
+    borderLeftWidth: 3,
+  },
+  taskRowLast: {
+    borderBottomWidth: 0,
   },
   taskInfo: {
     flex: 1,
@@ -695,8 +840,9 @@ const styles = StyleSheet.create({
     fontSize: 15,
     fontWeight: "700",
     color: colors.text,
+    lineHeight: 20,
   },
-  taskMeta: {
+  taskSubtitle: {
     marginTop: spacing.xs,
     fontSize: 12,
     color: colors.textMuted,
@@ -704,43 +850,109 @@ const styles = StyleSheet.create({
   taskMetaRow: {
     marginTop: spacing.xs,
     flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
   },
-  taskStatus: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.pill,
-  },
-  taskStatusDue: {
-    backgroundColor: todayTheme.taskStatus.dueBackground,
-  },
-  taskStatusOverdue: {
-    backgroundColor: todayTheme.taskStatus.overdueBackground,
+  taskStatusDot: {
+    width: 6,
+    height: 6,
+    borderRadius: 3,
   },
   taskStatusText: {
     fontSize: 11,
     fontWeight: "700",
   },
-  taskStatusTextDue: {
-    color: colors.primary,
-  },
-  taskStatusTextOverdue: {
-    color: colors.error,
-  },
   taskActions: {
     flexDirection: "row",
     alignItems: "center",
     gap: spacing.sm,
+    paddingTop: 2,
   },
-  taskButton: {
-    paddingHorizontal: spacing.md,
-    paddingVertical: spacing.xs,
-    borderRadius: radius.pill,
+  taskQuickAction: {
+    minWidth: 44,
+    height: 44,
+    borderRadius: radius.sm,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.surface,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.sm,
+    flexDirection: "row",
+    overflow: "hidden",
+  },
+  taskQuickActionActive: {
     backgroundColor: colors.primary,
+    borderColor: colors.primary,
   },
-  taskButtonText: {
+  sheetBackdrop: {
+    flex: 1,
+    backgroundColor: `${colors.text}73`,
+    justifyContent: "flex-end",
+  },
+  sheetCard: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    paddingHorizontal: spacing.lg,
+    paddingTop: spacing.lg,
+    paddingBottom: spacing.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    boxShadow: boxShadows.lg,
+  },
+  sheetHeader: {
+    flexDirection: "row",
+    alignItems: "flex-start",
+    justifyContent: "space-between",
+    gap: spacing.md,
+  },
+  sheetTitle: {
+    fontSize: 16,
+    fontWeight: "900",
+    color: colors.text,
+  },
+  sheetSubtitle: {
+    marginTop: spacing.xs,
+    fontSize: 13,
+    fontWeight: "600",
+    color: colors.textMuted,
+  },
+  sheetClose: {
+    width: 36,
+    height: 36,
+    alignItems: "center",
+    justifyContent: "center",
+    backgroundColor: colors.surface,
+  },
+  sheetList: {
+    marginTop: spacing.lg,
+    borderTopWidth: 1,
+    borderTopColor: colors.border,
+  },
+  sheetRow: {
+    paddingVertical: spacing.sm,
+    paddingHorizontal: spacing.md,
+    minHeight: 52,
+    justifyContent: "center",
+  },
+  sheetRowPressed: {
+    backgroundColor: colors.surfaceSoft,
+  },
+  sheetRowLabel: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.text,
+  },
+  sheetDivider: {
+    height: 1,
+    backgroundColor: colors.border,
+  },
+  sheetError: {
+    marginTop: spacing.sm,
     fontSize: 12,
-    fontWeight: "700",
-    color: colors.background,
+    color: colors.error,
+    fontWeight: "600",
   },
   weekRow: {
     flexDirection: "row",
@@ -787,48 +999,6 @@ const styles = StyleSheet.create({
   },
   weekDotActiveToday: {
     backgroundColor: colors.background,
-  },
-  statsRow: {
-    flexDirection: "row",
-    gap: spacing.sm,
-  },
-  statCard: {
-    flex: 1,
-    padding: spacing.sm,
-    borderRadius: radius.md,
-    borderWidth: 1,
-  },
-  summaryStatCard: {
-    borderColor: "rgba(255,255,255,0.35)",
-  },
-  summaryStatIconWrap: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    backgroundColor: "rgba(255,255,255,0.2)",
-    alignItems: "center",
-    justifyContent: "center",
-    marginBottom: spacing.xs,
-  },
-  summaryStatIconDue: {
-    backgroundColor: "rgba(255,255,255,0.3)",
-  },
-  summaryStatIconOverdue: {
-    backgroundColor: "rgba(255,255,255,0.3)",
-  },
-  summaryStatIconTotal: {
-    backgroundColor: "rgba(255,255,255,0.3)",
-  },
-  statValue: {
-    fontSize: 18,
-    fontWeight: "800",
-    color: colors.background,
-  },
-  statLabel: {
-    marginTop: 2,
-    fontSize: 11,
-    fontWeight: "600",
-    color: colors.background,
   },
 });
 
