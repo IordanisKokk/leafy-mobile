@@ -13,6 +13,8 @@ type SnackbarOptions = {
   message: string;
   type?: SnackbarType;
   duration?: number; // ms
+  actionLabel?: string;
+  onAction?: () => void;
 };
 
 type SnackbarContextValue = {
@@ -29,6 +31,10 @@ export const SnackbarProvider: React.FC<{ children: React.ReactNode }> = ({
   const [visible, setVisible] = useState(false);
   const [message, setMessage] = useState("");
   const [type, setType] = useState<SnackbarType>("info");
+  const [actionLabel, setActionLabel] = useState<string | undefined>(undefined);
+  const [actionHandler, setActionHandler] = useState<(() => void) | undefined>(
+    undefined,
+  );
   const hideTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   const hide = useCallback(() => {
@@ -36,7 +42,7 @@ export const SnackbarProvider: React.FC<{ children: React.ReactNode }> = ({
   }, []);
 
   const showSnackbar = useCallback(
-    ({ message, type = "info", duration = 3000 }: SnackbarOptions) => {
+    ({ message, type = "info", duration = 3000, actionLabel, onAction }: SnackbarOptions) => {
       // clear previous timeout if any
       if (hideTimeoutRef.current) {
         clearTimeout(hideTimeoutRef.current);
@@ -44,6 +50,8 @@ export const SnackbarProvider: React.FC<{ children: React.ReactNode }> = ({
 
       setMessage(message);
       setType(type);
+      setActionLabel(actionLabel);
+      setActionHandler(() => onAction);
       setVisible(true);
 
       hideTimeoutRef.current = setTimeout(() => {
@@ -68,6 +76,8 @@ export const SnackbarProvider: React.FC<{ children: React.ReactNode }> = ({
         visible={visible}
         message={message}
         type={type}
+        actionLabel={actionLabel}
+        onAction={actionHandler}
         onHide={hide}
       />
     </SnackbarContext.Provider>

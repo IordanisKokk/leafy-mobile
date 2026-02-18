@@ -1,6 +1,6 @@
 // src/components/Snackbar.tsx
 import React, { useEffect, useRef } from "react";
-import { Animated, StyleSheet, Text, Pressable } from "react-native";
+import { Animated, StyleSheet, Text, Pressable, View } from "react-native";
 
 export type SnackbarType = "info" | "error" | "success";
 
@@ -8,6 +8,8 @@ type Props = {
   visible: boolean;
   message: string;
   type?: SnackbarType;
+  actionLabel?: string;
+  onAction?: () => void;
   onHide?: () => void;
 };
 
@@ -15,6 +17,8 @@ export const Snackbar: React.FC<Props> = ({
   visible,
   message,
   type = "info",
+  actionLabel,
+  onAction,
   onHide,
 }) => {
   const translateY = useRef(new Animated.Value(500)).current; // start off-screen
@@ -45,13 +49,24 @@ export const Snackbar: React.FC<Props> = ({
         type === "success" && styles.success,
       ]}
     >
-      <Pressable
-        style={styles.inner}
-        onPress={onHide}
-        hitSlop={8}
-      >
-        <Text style={styles.text}>{message}</Text>
-      </Pressable>
+      <View style={styles.inner}>
+        <Pressable style={styles.messageWrap} onPress={onHide} hitSlop={8}>
+          <Text style={styles.text}>{message}</Text>
+        </Pressable>
+        {actionLabel && onAction ? (
+          <Pressable
+            onPress={() => {
+              onAction();
+              onHide?.();
+            }}
+            hitSlop={8}
+            accessibilityRole="button"
+            accessibilityLabel={actionLabel}
+          >
+            <Text style={styles.actionText}>{actionLabel}</Text>
+          </Pressable>
+        ) : null}
+      </View>
     </Animated.View>
   );
 };
@@ -72,11 +87,22 @@ const styles = StyleSheet.create({
     elevation: 4,
   },
   inner: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
     paddingHorizontal: 16,
     paddingVertical: 10,
+    gap: 12,
+  },
+  messageWrap: {
+    flex: 1,
   },
   text: {
     color: "#fff",
+  },
+  actionText: {
+    color: "#fff",
+    fontWeight: "700",
   },
   error: {
     backgroundColor: "#c0392b",
