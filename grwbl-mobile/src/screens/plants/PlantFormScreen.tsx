@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { View, Text, StyleSheet, TextInput, Image, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity } from "react-native";
+import { View, Text, StyleSheet, Image, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { PlantsStackParamList } from "../../navigation/PlantsStackNavigator";
 import { boxShadows, colors, radius, spacing } from "../../theme";
@@ -8,6 +8,8 @@ import { Ionicons } from "@expo/vector-icons";
 import { Species } from "../../api/species";
 import { savePlant } from "../../api/plants";
 import { useAuth } from "../../context/AuthContext";
+import RoomChips from "../../components/RoomChips";
+import FormField from "../../components/FormField";
 
 type Props = NativeStackScreenProps<PlantsStackParamList, "PlantForm">;
 
@@ -22,18 +24,7 @@ type PlantDraft = {
 };
 
 const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
-  const roomOptions = [
-    "Bedroom",
-    "Living Room",
-    "Kitchen",
-    "Balcony",
-    "Hallway",
-    "Bathroom",
-    "Guest room",
-    "Other",
-  ];
   const [selectedRoom, setSelectedRoom] = useState<string>("");
-  const [roomDropdownOpen, setRoomDropdownOpen] = useState<boolean>(false);
   const { species } = route.params;
   const [plant, setPlant] = useState<PlantDraft>({
     nickname: "",
@@ -52,7 +43,11 @@ const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
     const plantToSave = {
       "name": plant.nickname,
       "speciesId": plant.speciesId,
+      "room": plant.room,
       "location": plant.location,
+      "wateringFrequencyDays": plant.wateringFrequencyDays,
+      "lastWateredAt": plant.lastWateredAt,
+      "notes": plant.notes,
     }
     savePlant(plantToSave, auth.token)
     navigation.navigate("PlantsList");
@@ -172,69 +167,27 @@ const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
 
         <View style={styles.formCard}>
           <Text style={styles.sectionTitle}>Basics</Text>
-          <Text style={styles.label}>Nickname</Text>
-          <TextInput
-            style={styles.input}
+          <FormField
+            label="Nickname"
             placeholder={`e.g. Living room ${species.commonName}`}
-            placeholderTextColor="#64748b"
             value={plant.nickname}
             onChangeText={(text) => updateDraft("nickname", text)}
           />
 
-          <Text style={styles.label}>Room</Text>
-          <TouchableOpacity
-            style={styles.dropdown}
-            activeOpacity={0.8}
-            onPress={() => setRoomDropdownOpen((prev) => !prev)}
-          >
-            <Text
-              style={
-                selectedRoom ? styles.dropdownValue : styles.dropdownPlaceholder
-              }
-            >
-              {selectedRoom || "Select a room"}
-            </Text>
-            <Text style={styles.dropdownCaret}>
-              {roomDropdownOpen ? (
-                <Ionicons name="caret-up" size={12} color={colors.primarySoft} />
-              ) : (
-                <Ionicons name="caret-down" size={12} color={colors.primarySoft} />
-              )}
-            </Text>
-          </TouchableOpacity>
-          {roomDropdownOpen && (
-            <View style={styles.dropdownOptions}>
-              {roomOptions.map((room) => (
-                <TouchableOpacity
-                  key={room}
-                  style={[
-                    styles.dropdownOption,
-                    selectedRoom === room && styles.dropdownOptionSelected,
-                  ]}
-                  onPress={() => {
-                    setSelectedRoom(room);
-                    setRoomDropdownOpen(false);
-                    setPlant((prev) => ({ ...prev, room }));
-                  }}
-                >
-                  <Text
-                    style={[
-                      styles.dropdownOptionText,
-                      selectedRoom === room && styles.dropdownOptionTextSelected,
-                    ]}
-                  >
-                    {room}
-                  </Text>
-                </TouchableOpacity>
-              ))}
-            </View>
-          )}
+          <View style={styles.roomField}>
+            <Text style={styles.fieldLabel}>Room</Text>
+            <RoomChips
+              selectedRoom={selectedRoom}
+              onSelect={(room) => {
+                setSelectedRoom(room);
+                setPlant((prev) => ({ ...prev, room }));
+              }}
+            />
+          </View>
 
-          <Text style={styles.label}>Location</Text>
-          <TextInput
-            style={styles.input}
+          <FormField
+            label="Location"
             placeholder="e.g. North window shelf"
-            placeholderTextColor="#64748b"
             value={plant.location}
             onChangeText={(text) => updateDraft("location", text)}
           />
@@ -242,12 +195,9 @@ const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
 
         <View style={styles.formCard}>
           <Text style={styles.sectionTitle}>Care</Text>
-
-          <Text style={styles.label}>Watering frequency (days)</Text>
-          <TextInput
-            style={styles.input}
+          <FormField
+            label="Watering frequency (days)"
             placeholder={`${species.defaultWateringIntervalDays} (species default)`}
-            placeholderTextColor="#64748b"
             keyboardType="numeric"
             inputMode="numeric"
             value={plant.wateringFrequencyDays.toString()}
@@ -256,24 +206,21 @@ const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
             }
           />
 
-          <Text style={styles.label}>Last watered at</Text>
-          <TextInput
-            style={styles.input}
+          <FormField
+            label="Last watered at"
             placeholder="YYYY-MM-DD (tap to pick a date)"
-            placeholderTextColor="#64748b"
             inputMode="numeric"
             value={plant.lastWateredAt}
             onChangeText={(text) => updateDraft("lastWateredAt", text)}
           />
 
-          <Text style={styles.label}>Notes</Text>
-          <TextInput
-            style={[styles.input, styles.notesInput]}
+          <FormField
+            label="Notes"
             placeholder="Care notes, light conditions, etc."
-            placeholderTextColor="#64748b"
             multiline
             value={plant.notes}
             onChangeText={(text) => updateDraft("notes", text)}
+            style={styles.notesInput}
           />
         </View>
         <TouchableOpacity style={styles.button} onPress={() => handleSavePlant()}>
@@ -317,7 +264,7 @@ const styles = StyleSheet.create({
   speciesCard: {
     flexDirection: "column",
     backgroundColor: colors.surface,
-    borderRadius: radius.lg,
+    borderRadius: radius.md,
     padding: spacing.md,
     marginBottom: spacing.lg,
     borderWidth: 1,
@@ -380,7 +327,7 @@ const styles = StyleSheet.create({
   },
   formCard: {
     backgroundColor: colors.surface,
-    borderRadius: radius.lg,
+    borderRadius: radius.md,
     padding: spacing.md,
     borderWidth: 1,
     borderColor: colors.border,
@@ -388,75 +335,23 @@ const styles = StyleSheet.create({
     marginBottom: spacing.md,
   },
   sectionTitle: {
-    fontSize: 16,
-    fontWeight: "700",
+    fontSize: 13,
+    fontWeight: "800",
     color: colors.text,
     marginBottom: spacing.md,
   },
-  label: {
-    fontSize: 14,
+  fieldLabel: {
+    fontSize: 12,
     marginBottom: spacing.xs,
-    color: colors.text,
+    color: colors.textMuted,
+    fontWeight: "700",
   },
-  input: {
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.lg,
-    color: colors.text,
-    backgroundColor: colors.surfaceSoft,
-    boxShadow: boxShadows.md,
+  roomField: {
+    marginBottom: spacing.md,
   },
   notesInput: {
     minHeight: 90,
     textAlignVertical: "top",
-  },
-  dropdown: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "space-between",
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.xs,
-    backgroundColor: colors.surfaceSoft,
-  },
-  dropdownPlaceholder: {
-    color: "#64748b",
-  },
-  dropdownValue: {
-    color: colors.text,
-  },
-  dropdownCaret: {
-    color: colors.textMuted,
-    fontSize: 12,
-  },
-  dropdownOptions: {
-    borderWidth: 1,
-    borderColor: colors.border,
-    borderRadius: radius.md,
-    backgroundColor: colors.surface,
-    marginTop: spacing.xs,
-    marginBottom: spacing.md,
-    overflow: "hidden",
-  },
-  dropdownOption: {
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.lg,
-  },
-  dropdownOptionSelected: {
-    backgroundColor: colors.primary + "10",
-  },
-  dropdownOptionText: {
-    color: colors.text,
-  },
-  dropdownOptionTextSelected: {
-    color: colors.primary,
-    fontWeight: "700",
   },
   button: {
     alignSelf: "flex-start",

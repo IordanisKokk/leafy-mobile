@@ -1,7 +1,7 @@
 // src/api/client.ts
 import { API_BASE_URL } from "./config";
 
-export type HttpMethod = "GET" | "POST";
+export type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE";
 
 export interface RequestOptions {
   headers?: Record<string, string>;
@@ -47,7 +47,7 @@ async function request<T>(
   const response = await fetch(url, {
     method,
     headers,
-    body: method === "POST" && body != null ? JSON.stringify(body) : undefined,
+    body: method !== "GET" && body != null ? JSON.stringify(body) : undefined,
   });
 
   if (response.status === 204) {
@@ -85,4 +85,27 @@ export function post<T = unknown>(
   options?: RequestOptions,
 ): Promise<ApiResponse<T>> {
   return request<T>("POST", path, body, options);
+}
+
+export function put<T = unknown>(
+  path: string,
+  body: unknown,
+  options?: RequestOptions,
+): Promise<ApiResponse<T>> {
+  return request<T>("PUT", path, body, options);
+}
+
+export function patch<T = unknown>(
+  path: string,
+  body: unknown,
+  options?: RequestOptions,
+): Promise<ApiResponse<T>> {
+  return request<T>("PATCH", path, body, options);
+}
+
+export function del<T = unknown>(
+  path: string,
+  options?: RequestOptions,
+): Promise<ApiResponse<T>> {
+  return request<T>("DELETE", path, undefined, options);
 }

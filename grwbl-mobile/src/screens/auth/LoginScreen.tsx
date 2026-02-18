@@ -4,7 +4,6 @@ import {
   View,
   Text,
   StyleSheet,
-  TextInput,
   TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
@@ -18,6 +17,7 @@ import { AuthStackParamList } from "../../navigation/AuthStackNavigator";
 import { useAuth } from "../../context/AuthContext";
 import { useSnackbar } from "../../context/SnackbarContext";
 import { LoginRequestError } from "../../api/auth";
+import FormField from "../../components/FormField";
 
 
 type Props = NativeStackScreenProps<AuthStackParamList, "Login">;
@@ -76,24 +76,20 @@ const LoginScreen: React.FC<Props> = ({ navigation }) => {
         <Text style={styles.subtitle}>Sign in to sync your plants and tasks.</Text>
 
         <View style={styles.card}>
-          <Text style={styles.label}>Email</Text>
-          <TextInput
+          <FormField
+            label="Email"
             value={email}
             onChangeText={setEmail}
-            style={styles.input}
             placeholder="you@domain.com"
-            placeholderTextColor="#64748b"
             keyboardType="email-address"
             autoCapitalize="none"
           />
 
-          <Text style={styles.label}>Password</Text>
-          <TextInput
+          <FormField
+            label="Password"
             value={password}
             onChangeText={setPassword}
-            style={styles.input}
             placeholder="••••••••"
-            placeholderTextColor="#64748b"
             secureTextEntry
           />
 
@@ -144,22 +140,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surface,
     borderRadius: radius.md,
     padding: spacing.md,
-    boxShadow: boxShadows.md,
-  },
-  label: {
-    fontSize: 13,
-    color: colors.text,
-    marginBottom: spacing.xs,
-  },
-  input: {
-    borderRadius: radius.lg,
     borderWidth: 1,
     borderColor: colors.border,
-    paddingHorizontal: spacing.lg,
-    paddingVertical: spacing.sm,
-    marginBottom: spacing.md,
-    color: colors.text,
-    backgroundColor: colors.background,
+    boxShadow: boxShadows.md,
   },
   button: {
     flexDirection: "row",

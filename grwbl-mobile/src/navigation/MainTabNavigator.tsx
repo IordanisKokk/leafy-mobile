@@ -1,14 +1,15 @@
 import React from "react";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
+import { NavigatorScreenParams, StackActions } from "@react-navigation/native";
 import TodayScreen from "../screens/main/TodayScreen";
 import SettingsScreen from "../screens/main/SettingsScreen";
-import PlantsStackNavigator from "./PlantsStackNavigator";
+import PlantsStackNavigator, { PlantsStackParamList } from "./PlantsStackNavigator";
 import { Ionicons } from "@expo/vector-icons";
 import { colors } from "../theme";
 
 export type MainTabParamList = {
   Today: undefined;
-  Plants: undefined;
+  Plants: NavigatorScreenParams<PlantsStackParamList>;
   Settings: undefined;
 };
 
@@ -17,8 +18,12 @@ const Tab = createBottomTabNavigator<MainTabParamList>();
 const MainTabNavigator: React.FC = () => {
   return (
     <Tab.Navigator
+      lazy={false}
+      detachInactiveScreens={false}
       screenOptions={({ route }) => ({
         headerShown: false,
+        animation: "fade",
+        sceneStyle: { backgroundColor: colors.background },
         tabBarStyle: {
           backgroundColor: colors.background,
           borderTopColor: colors.border,
@@ -50,6 +55,17 @@ const MainTabNavigator: React.FC = () => {
         name="Plants"
         component={PlantsStackNavigator}
         options={{ title: "Plants" }}
+        listeners={({ navigation, route }) => ({
+          blur: () => {
+            const state = route.state;
+            if (state && state.index > 0) {
+              navigation.dispatch({
+                ...StackActions.popToTop(),
+                target: state.key,
+              });
+            }
+          },
+        })}
       />
       <Tab.Screen
         name="Settings"

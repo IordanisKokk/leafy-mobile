@@ -9,6 +9,11 @@ type HeaderProps = {
   showBackButton?: boolean; // should *this* screen show a back button?
   showLogo?: boolean;       // should show the grwbl logo?
   hide?: boolean;           // sometimes: no header at all
+  rightAction?: {
+    icon: keyof typeof Ionicons.glyphMap;
+    onPress: () => void;
+    accessibilityLabel?: string;
+  };
 };
 
 const Header: React.FC<HeaderProps> = ({
@@ -16,6 +21,7 @@ const Header: React.FC<HeaderProps> = ({
   showBackButton = false,
   showLogo = true,
   hide = false,
+  rightAction,
 }) => {
   const navigation = useNavigation();
   const canGoBack = navigation.canGoBack();
@@ -59,7 +65,23 @@ const Header: React.FC<HeaderProps> = ({
         <Text style={styles.logoText}>{title ?? "grwbl"}</Text>
       </View>
 
-      <View style={styles.rightPlaceholder} />
+      {rightAction ? (
+        <TouchableOpacity
+          onPress={rightAction.onPress}
+          style={styles.rightAction}
+          accessibilityRole="button"
+          accessibilityLabel={rightAction.accessibilityLabel}
+          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+        >
+          <Ionicons
+            name={rightAction.icon}
+            size={22}
+            color={colors.primary}
+          />
+        </TouchableOpacity>
+      ) : (
+        <View style={styles.rightPlaceholder} />
+      )}
     </View>
   );
 };
@@ -91,6 +113,12 @@ const styles = StyleSheet.create({
   },
   rightPlaceholder: {
     width: 32,
+  },
+  rightAction: {
+    width: 32,
+    height: 32,
+    alignItems: "center",
+    justifyContent: "center",
   },
 });
 

@@ -19,7 +19,6 @@ import {
   Modal,
   Pressable,
   Platform,
-  TextInput,
 } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { Ionicons } from "@expo/vector-icons";
@@ -27,6 +26,10 @@ import { PlantsStackParamList } from "../../navigation/PlantsStackNavigator";
 import { boxShadows, colors, radius, spacing } from "../../theme";
 import Header from "../../components/Header";
 import { useSnackbar } from "../../context/SnackbarContext";
+import { useAuth } from "../../context/AuthContext";
+import { Plant, PlantUpdate, deletePlant, updatePlant } from "../../api/plants";
+import PlantEditModal, { EditDraft } from "./components/PlantEditModal";
+import FormField from "../../components/FormField";
 
 type Props = NativeStackScreenProps<PlantsStackParamList, "PlantDetails">;
 
@@ -45,6 +48,73 @@ function parseDate(value?: string | null): Date | null {
   return d;
 }
 
+function padDatePart(value: number): string {
+  return String(value).padStart(2, "0");
+}
+
+function formatDateInput(value?: string | null): string {
+  if (!value) return "";
+  const existingDisplay = value.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (existingDisplay) {
+    return value;
+  }
+  const isoMatch = value.match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (isoMatch) {
+    return `${isoMatch[3]}-${isoMatch[2]}-${isoMatch[1]}`;
+  }
+
+  const parsed = parseDate(value);
+  if (!parsed) return value;
+  return `${padDatePart(parsed.getDate())}-${padDatePart(parsed.getMonth() + 1)}-${parsed.getFullYear()}`;
+}
+
+function isValidDateParts(day: number, month: number, year: number): boolean {
+  const date = new Date(year, month - 1, day);
+  return (
+    date.getFullYear() === year &&
+    date.getMonth() === month - 1 &&
+    date.getDate() === day
+  );
+}
+
+function normalizeDateInput(value: string): { value: string | null; error?: string } {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return { value: null };
+  }
+
+  const dayMonthYear = trimmed.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (dayMonthYear) {
+    const day = Number.parseInt(dayMonthYear[1], 10);
+    const month = Number.parseInt(dayMonthYear[2], 10);
+    const year = Number.parseInt(dayMonthYear[3], 10);
+    if (!isValidDateParts(day, month, year)) {
+      return { value: null, error: "Enter a valid date" };
+    }
+    return { value: `${year}-${padDatePart(month)}-${padDatePart(day)}` };
+  }
+
+  const isoDate = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (isoDate) {
+    const year = Number.parseInt(isoDate[1], 10);
+    const month = Number.parseInt(isoDate[2], 10);
+    const day = Number.parseInt(isoDate[3], 10);
+    if (!isValidDateParts(day, month, year)) {
+      return { value: null, error: "Enter a valid date" };
+    }
+    return { value: trimmed };
+  }
+
+  const parsed = parseDate(trimmed);
+  if (parsed) {
+    return {
+      value: `${parsed.getFullYear()}-${padDatePart(parsed.getMonth() + 1)}-${padDatePart(parsed.getDate())}`,
+    };
+  }
+
+  return { value: null, error: "Enter a valid date" };
+}
+
 function computeNextWateringDate(
   lastWateredAt?: string | null,
   wateringIntervalDays?: number,
@@ -58,24 +128,42 @@ function computeNextWateringDate(
   return next;
 }
 
-const PlantDetailsScreen: React.FC<Props> = ({ route }) => {
-  const { plant } = route.params;
-  const { showSnackbar } = useSnackbar();
-
-  const speciesCommonName = plant.species?.commonName ?? "Unknown species";
-  const speciesScientificName = plant.species?.scientificName;
+const buildEditDraft = (plant: Plant): EditDraft => {
   const intervalDays = plant.wateringIntervalDays ?? plant.wateringFrequencyDays;
-  const speciesImageUrl = plant.species?.imageUrl;
+
+  return {
+    name: plant.name ?? "",
+    room: plant.room ?? "",
+    location: plant.location ?? "",
+    wateringFrequencyDays: intervalDays ? String(intervalDays) : "",
+    lastWateredAt: formatDateInput(plant.lastWateredAt),
+    notes: plant.notes ?? "",
+  };
+};
+
+const PlantDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
+  const { plant: initialPlant } = route.params;
+  const { showSnackbar } = useSnackbar();
+  const auth = useAuth();
+  const [currentPlant, setCurrentPlant] = React.useState<Plant>(initialPlant);
+
+  const speciesCommonName = currentPlant.species?.commonName ?? "Unknown species";
+  const speciesScientificName = currentPlant.species?.scientificName;
+  const intervalDays = currentPlant.wateringIntervalDays ?? currentPlant.wateringFrequencyDays;
+  const speciesImageUrl = currentPlant.species?.imageUrl;
 
   const [isIntervalModalVisible, setIsIntervalModalVisible] = React.useState(false);
-  const [intervalDraft, setIntervalDraft] = React.useState<string>(intervalDays ? String(intervalDays) : "");
-  const [localIntervalDays, setLocalIntervalDays] = React.useState<number | undefined>(intervalDays);
+  const [intervalDraft, setIntervalDraft] = React.useState<string>(
+    intervalDays ? String(intervalDays) : "",
+  );
+  const [isEditModalVisible, setIsEditModalVisible] = React.useState(false);
+  const [editDraft, setEditDraft] = React.useState<EditDraft>(() => buildEditDraft(initialPlant));
 
-  const effectiveIntervalDays = localIntervalDays;
+  const effectiveIntervalDays = intervalDays;
 
-  const lastWateredDate = parseDate(plant.lastWateredAt);
+  const lastWateredDate = parseDate(currentPlant.lastWateredAt);
   const nextWateringDate = computeNextWateringDate(
-    plant.lastWateredAt,
+    currentPlant.lastWateredAt,
     effectiveIntervalDays,
   );
 
@@ -96,7 +184,56 @@ const PlantDetailsScreen: React.FC<Props> = ({ route }) => {
     setIsIntervalModalVisible(false);
   };
 
-  const submitIntervalEdit = () => {
+  const openEditModal = () => {
+    setEditDraft(buildEditDraft(currentPlant));
+    setIsEditModalVisible(true);
+  };
+
+  const closeEditModal = () => {
+    setIsEditModalVisible(false);
+  };
+
+  const updateEditDraft = <K extends keyof EditDraft>(key: K, value: EditDraft[K]) => {
+    setEditDraft((prev) => ({ ...prev, [key]: value }));
+  };
+
+  const applyPlantUpdate = async (updates: PlantUpdate, successMessage: string): Promise<boolean> => {
+    try {
+      const updatedPlant = await updatePlant(currentPlant.id, updates, auth.token);
+
+      if (updatedPlant) {
+        setCurrentPlant(updatedPlant);
+      } else {
+        setCurrentPlant((prev) => ({
+          ...prev,
+          ...updates,
+          wateringIntervalDays:
+            updates.wateringIntervalDays ??
+            updates.wateringFrequencyDays ??
+            prev.wateringIntervalDays,
+          wateringFrequencyDays:
+            updates.wateringFrequencyDays ??
+            updates.wateringIntervalDays ??
+            prev.wateringFrequencyDays,
+        }));
+      }
+
+      showSnackbar({ message: successMessage, type: "success", duration: 2000 });
+      return true;
+    } catch (err) {
+      console.error("updatePlant failed:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+
+      if (msg.includes("401") || msg.includes("403")) {
+        auth.logout?.();
+      }
+
+      showSnackbar({ message: "Could not update plant. Please try again.", type: "error", duration: 2000 });
+      return false;
+    }
+  };
+
+  const submitIntervalEdit = async () => {
     const parsed = Number.parseInt(intervalDraft, 10);
     if (!Number.isFinite(parsed) || Number.isNaN(parsed) || parsed <= 0) {
       showSnackbar({
@@ -112,36 +249,101 @@ const PlantDetailsScreen: React.FC<Props> = ({ route }) => {
       return;
     }
 
-    setLocalIntervalDays(parsed);
-    setIsIntervalModalVisible(false);
-    showSnackbar({ message: "Watering frequency updated (dummy)", type: "info", duration: 2000 });
+    const success = await applyPlantUpdate(
+      { wateringFrequencyDays: parsed },
+      "Watering frequency updated",
+    );
+
+    if (success) {
+      setIsIntervalModalVisible(false);
+    }
   };
 
   const handleWaterNow = () => {
-    console.log("Water now pressed for:", plant.id);
+    console.log("Water now pressed for:", currentPlant.id);
     showSnackbar({ message: "Watering action coming soon (dummy)", type: "info", duration: 2000 });
   };
 
   const handleEdit = () => {
-    showSnackbar({ message: "Editing coming soon", type: "info", duration: 2000 });
+    openEditModal();
   };
 
   const handleDelete = () => {
     Alert.alert(
       "Delete plant?",
-      "This is a placeholder. Deletion is not implemented yet.",
+      "This will permanently remove this plant.",
       [
         { text: "Cancel", style: "cancel" },
         {
           text: "Delete",
           style: "destructive",
-          onPress: () => {
-            console.log("Delete confirmed (dummy) for:", plant.id);
-            showSnackbar({ message: "Delete is coming soon (dummy)", type: "info", duration: 2000 });
-          },
+          onPress: async () => {
+            try {
+              await deletePlant(currentPlant.id, auth.token);
+              showSnackbar({ message: "Plant deleted", type: "success", duration: 2000 });
+              navigation.goBack();
+            } catch (err) {
+              console.error("deletePlant failed:", err);
+              const msg = err instanceof Error ? err.message : String(err);
+
+              if (msg.includes("401") || msg.includes("403")) {
+                auth.logout?.();
+              }
+
+              showSnackbar({ message: "Could not delete plant. Please try again.", type: "error", duration: 2000 });
+            }
+          }
         },
       ],
     );
+  };
+
+  const submitEdit = async () => {
+    const trimmedName = editDraft.name.trim();
+    if (!trimmedName) {
+      showSnackbar({ message: "Plant nickname is required", type: "error", duration: 2000 });
+      return;
+    }
+
+    const intervalValue = editDraft.wateringFrequencyDays.trim();
+    let parsedInterval: number | undefined;
+
+    if (intervalValue) {
+      parsedInterval = Number.parseInt(intervalValue, 10);
+      if (!Number.isFinite(parsedInterval) || Number.isNaN(parsedInterval) || parsedInterval <= 0) {
+        showSnackbar({ message: "Enter a valid watering frequency", type: "error", duration: 2000 });
+        return;
+      }
+      if (parsedInterval > 90) {
+        showSnackbar({ message: "Max is 90 days", type: "error", duration: 2000 });
+        return;
+      }
+    }
+
+    const updates: PlantUpdate = {
+      name: trimmedName,
+      room: editDraft.room.trim(),
+      location: editDraft.location.trim(),
+      notes: editDraft.notes.trim(),
+      lastWateredAt: editDraft.lastWateredAt.trim() || null,
+    };
+
+    if (parsedInterval !== undefined) {
+      updates.wateringFrequencyDays = parsedInterval;
+    }
+
+    const dateResult = normalizeDateInput(editDraft.lastWateredAt);
+    if (dateResult.error) {
+      showSnackbar({ message: "Enter a valid last watered date", type: "error", duration: 2000 });
+      return;
+    }
+
+    updates.lastWateredAt = dateResult.value;
+
+    const success = await applyPlantUpdate(updates, "Plant updated");
+    if (success) {
+      setIsEditModalVisible(false);
+    }
   };
 
   return (
@@ -154,7 +356,7 @@ const PlantDetailsScreen: React.FC<Props> = ({ route }) => {
           <View style={styles.heroTopRow}>
             <View style={styles.heroTextCol}>
               <Text style={styles.name} numberOfLines={2}>
-                {plant.name}
+                {currentPlant.name}
               </Text>
               <Text style={styles.subtitle} numberOfLines={2}>
                 {speciesScientificName
@@ -174,14 +376,14 @@ const PlantDetailsScreen: React.FC<Props> = ({ route }) => {
                     {effectiveIntervalDays ? `Every ${effectiveIntervalDays} days` : "No schedule"}
                   </Text>
                 </TouchableOpacity>
-                {!!plant.room && (
+                {!!currentPlant.room && (
                   <View style={styles.tag}>
-                    <Text style={styles.tagText} numberOfLines={1}>{plant.room}</Text>
+                    <Text style={styles.tagText} numberOfLines={1}>{currentPlant.room}</Text>
                   </View>
                 )}
-                {!!plant.location && (
+                {!!currentPlant.location && (
                   <View style={styles.tag}>
-                    <Text style={styles.tagText} numberOfLines={1}>{plant.location}</Text>
+                    <Text style={styles.tagText} numberOfLines={1}>{currentPlant.location}</Text>
                   </View>
                 )}
               </View>
@@ -230,16 +432,16 @@ const PlantDetailsScreen: React.FC<Props> = ({ route }) => {
           <Text style={styles.sectionTitle}>Details</Text>
           <View style={styles.metaRow}>
             <Text style={styles.metaLabel}>Room</Text>
-            <Text style={styles.metaValue}>{plant.room || "Not set"}</Text>
+            <Text style={styles.metaValue}>{currentPlant.room || "Not set"}</Text>
           </View>
           <View style={styles.metaRow}>
             <Text style={styles.metaLabel}>Location</Text>
-            <Text style={styles.metaValue}>{plant.location || "Not set"}</Text>
+            <Text style={styles.metaValue}>{currentPlant.location || "Not set"}</Text>
           </View>
 
           <View style={styles.notesBlock}>
             <Text style={styles.metaLabel}>Notes</Text>
-            <Text style={styles.notes}>{plant.notes || "No notes yet"}</Text>
+            <Text style={styles.notes}>{currentPlant.notes || "No notes yet"}</Text>
           </View>
         </View>          
 
@@ -292,20 +494,15 @@ const PlantDetailsScreen: React.FC<Props> = ({ route }) => {
               </TouchableOpacity>
             </View>
 
-            <View style={styles.inputRow}>
-              <Text style={styles.inputLabel}>Every</Text>
-              <TextInput
-                style={styles.input}
-                value={intervalDraft}
-                onChangeText={(t) => setIntervalDraft(t.replace(/[^0-9]/g, ""))}
-                placeholder="7"
-                placeholderTextColor={colors.textMuted}
-                keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
-                returnKeyType="done"
-                maxLength={2}
-              />
-              <Text style={styles.inputLabel}>days</Text>
-            </View>
+            <FormField
+              label="Watering frequency (days)"
+              value={intervalDraft}
+              onChangeText={(t) => setIntervalDraft(t.replace(/[^0-9]/g, ""))}
+              placeholder="7"
+              keyboardType={Platform.OS === "ios" ? "number-pad" : "numeric"}
+              returnKeyType="done"
+              maxLength={2}
+            />
 
             <View style={styles.modalButtonsRow}>
               <TouchableOpacity
@@ -326,6 +523,13 @@ const PlantDetailsScreen: React.FC<Props> = ({ route }) => {
           </Pressable>
         </Pressable>
       </Modal>
+      <PlantEditModal
+        visible={isEditModalVisible}
+        draft={editDraft}
+        onChange={updateEditDraft}
+        onClose={closeEditModal}
+        onSave={submitEdit}
+      />
     </View>
   );
 };
@@ -581,31 +785,6 @@ const styles = StyleSheet.create({
     alignItems: "center",
     justifyContent: "center",
     backgroundColor: colors.surface,
-  },
-  inputRow: {
-    marginTop: spacing.lg,
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    gap: spacing.sm,
-  },
-  inputLabel: {
-    fontSize: 14,
-    fontWeight: "800",
-    color: colors.textMuted,
-  },
-  input: {
-    width: 72,
-    height: 44,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: colors.surfaceSoft,
-    textAlign: "center",
-    fontSize: 16,
-    fontWeight: "900",
-    color: colors.text,
-    paddingHorizontal: spacing.sm,
   },
   modalButtonsRow: {
     marginTop: spacing.lg,

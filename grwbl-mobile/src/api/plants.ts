@@ -1,4 +1,4 @@
-import { get, post } from "./client";
+import { del, get, patch, post, put } from "./client";
 
 export type PlantSpecies = {
     id: string;
@@ -23,6 +23,17 @@ export type Plant = {
     lastWateredAt?: string | null;
     notes?: string;
 }
+
+export type PlantUpdate = {
+    name?: string;
+    speciesId?: string;
+    room?: string;
+    location?: string;
+    wateringFrequencyDays?: number;
+    wateringIntervalDays?: number;
+    lastWateredAt?: string | null;
+    notes?: string;
+};
 
 export const fetchPlants = async (authToken: string | null): Promise<Plant[]> => {
     if (!authToken) {
@@ -59,4 +70,59 @@ export const savePlant = async (plantData: Omit<Plant, "id">, authToken: string 
     }
 
     return response.data;
+}
+
+export const updatePlant = async (
+    plantId: string,
+    updates: PlantUpdate,
+    authToken: string | null,
+): Promise<Plant | null> => {
+    if (!authToken) {
+        throw new Error("No auth token provided");
+    }
+
+    const response = await patch<Plant>(`/plants/${plantId}`, updates, {
+        headers: {
+            Authorization: `Bearer ${authToken}`,
+        },
+    });
+
+    if (response.ok) {
+        return response.data ?? null;
+    }
+
+    if (response.status !== 404 && response.status !== 405) {
+        throw new Error(`Failed to update plant: ${response.status}`);
+    }
+
+    const fallbackResponse = await put<Plant>(`/plants/${plantId}`, updates, {
+        headers: {
+            Authorization: `Bearer ${authToken}`,
+        },
+    });
+
+    if (!fallbackResponse.ok) {
+        throw new Error(`Failed to update plant: ${fallbackResponse.status}`);
+    }
+
+    return fallbackResponse.data ?? null;
+}
+
+export const deletePlant = async (
+    plantId: string,
+    authToken: string | null,
+): Promise<void> => {
+    if (!authToken) {
+        throw new Error("No auth token provided");
+    }
+
+    const response = await del(`/plants/${plantId}`, {
+        headers: {
+            Authorization: `Bearer ${authToken}`,
+        },
+    });
+
+    if (!response.ok) {
+        throw new Error(`Failed to delete plant: ${response.status}`);
+    }
 }

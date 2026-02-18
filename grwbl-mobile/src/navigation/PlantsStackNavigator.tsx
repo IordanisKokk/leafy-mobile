@@ -23,7 +23,9 @@ const PlantsStackNavigator: React.FC = () => {
   return (
     <Stack.Navigator
       screenOptions={{
-        headerShown: false
+        headerShown: false,
+        animation: "slide_from_right",
+        contentStyle: { backgroundColor: colors.background }
       }}
     >
       <Stack.Screen
