@@ -360,11 +360,6 @@ const TodayScreen: React.FC = () => {
 
           </LinearGradient>
 
-          <View style={styles.taskSectionCard}>
-            <View style={styles.taskSectionHeader}>
-              <Text style={styles.taskSectionTitle}>Plants to water</Text>
-              <Text style={styles.taskSectionCount}>{dueTasks.length}</Text>
-            </View>
             {dueTasks.length === 0 ? (
               <View style={styles.taskEmptyState}>
                 <Text style={styles.taskEmptyTitle}>Nothing needs water</Text>
@@ -457,16 +452,15 @@ const TodayScreen: React.FC = () => {
                     }
                     accessibilityRole="button"
                   >
-                    <Ionicons name="water-outline" size={16} color={colors.primary} />
+                    <Ionicons name="water-outline" size={16} color={colors.surface} />
                     <Text style={styles.moreTasksText}>
                       +{remainingTasks} more plants to water
                     </Text>
-                    <Ionicons name="chevron-forward" size={16} color={colors.primary} />
+                    <Ionicons name="chevron-forward" size={16} color={colors.surface} />
                   </TouchableOpacity>
                 )}
               </View>
             )}
-          </View>
 
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeaderRow}>
@@ -803,6 +797,7 @@ const styles = StyleSheet.create({
     overflow: "hidden",
     borderWidth: 1,
     borderColor: colors.border,
+    marginBottom: spacing.md,
   },
   moreTasksRow: {
     flexDirection: "row",
@@ -811,11 +806,11 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
     paddingVertical: spacing.sm,
     paddingHorizontal: spacing.md,
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: colors.primary,
   },
   moreTasksText: {
     fontSize: 12,
-    color: colors.primary,
+    color: colors.surface,
     fontWeight: "600",
   },
   taskRow: {
