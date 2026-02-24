@@ -156,7 +156,11 @@ const TodayScreen: React.FC = () => {
     return streak;
   })();
 
-  const heroPalette = todayTheme.hero.neutral;
+  const heroPalette = overdueCount > 0
+    ? todayTheme.hero.overdue
+    : dueTasks.length > 0
+      ? todayTheme.hero.due
+      : todayTheme.hero.neutral;
   const heroGradientColors = heroPalette.gradient;
   const heroBubbleColors = heroPalette.bubbles;
   const heroBorderColor = heroPalette.border;
