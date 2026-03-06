@@ -1,11 +1,11 @@
-import { del, get, patch, post, put } from "./client";
+import { del, get, patch, post } from "./client";
 
 export type PlantSpecies = {
     id: string;
     commonName: string;
     scientificName: string;
     description?: string;
-    defaultWateringIntervalDays?: number;
+    defaultwateringFrequencyDays?: number;
     imageUrl?: string;
 };
 
@@ -17,8 +17,6 @@ export type Plant = {
     species?: PlantSpecies;
     room?: string;
     location?: string;
-    // list endpoint uses wateringIntervalDays; keep wateringFrequencyDays for backwards-compat
-    wateringIntervalDays?: number;
     wateringFrequencyDays?: number;
     lastWateredAt?: string | null;
     notes?: string;
@@ -30,7 +28,6 @@ export type PlantUpdate = {
     room?: string;
     location?: string;
     wateringFrequencyDays?: number;
-    wateringIntervalDays?: number;
     lastWateredAt?: string | null;
     notes?: string;
 };
@@ -87,25 +84,11 @@ export const updatePlant = async (
         },
     });
 
-    if (response.ok) {
-        return response.data ?? null;
-    }
-
-    if (response.status !== 404 && response.status !== 405) {
+    if (!response.ok) {
         throw new Error(`Failed to update plant: ${response.status}`);
     }
 
-    const fallbackResponse = await put<Plant>(`/plants/${plantId}`, updates, {
-        headers: {
-            Authorization: `Bearer ${authToken}`,
-        },
-    });
-
-    if (!fallbackResponse.ok) {
-        throw new Error(`Failed to update plant: ${fallbackResponse.status}`);
-    }
-
-    return fallbackResponse.data ?? null;
+    return response.data ?? null;
 }
 
 export const deletePlant = async (
