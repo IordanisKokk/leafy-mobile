@@ -18,7 +18,7 @@ import { Plant, fetchPlants } from "../../api/plants";
 import { useAuth } from "../../context/AuthContext";
 import { useSnackbar } from "../../context/SnackbarContext";
 import WateringCan from "../../../assets/watering-can/watering-can.svg";
-import { useNavigation } from "@react-navigation/native";
+import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { MainTabParamList } from "../../navigation/MainTabNavigator";
 import QuickActionsDock, { QuickAction } from "./components/QuickActionsDock";
@@ -46,7 +46,7 @@ const addDays = (date: Date, days: number) => {
 };
 
 const computeNextWateringDate = (plant: Plant) => {
-  const intervalDays = plant.wateringIntervalDays ?? plant.wateringFrequencyDays;
+  const intervalDays = plant.wateringFrequencyDays ?? plant.wateringFrequencyDays;
   if (!intervalDays || intervalDays <= 0) return null;
   if (!plant.lastWateredAt) return null;
 
@@ -89,13 +89,15 @@ const TodayScreen: React.FC = () => {
     }
   }, [auth.token]);
 
-  React.useEffect(() => {
-    void loadPlants();
-  }, [loadPlants]);
+  useFocusEffect(
+    React.useCallback(() => {
+      void loadPlants();
+    }, [loadPlants]),
+  );
 
   const today = startOfDay(new Date());
   const computeNextWateringDateForPlant = (plant: Plant): Date | null => {
-    const intervalDays = plant.wateringIntervalDays ?? plant.wateringFrequencyDays;
+    const intervalDays = plant.wateringFrequencyDays ?? plant.wateringFrequencyDays;
     if (!intervalDays || intervalDays <= 0) return null;
 
     const baseNextDate = computeNextWateringDate(plant);
@@ -112,7 +114,7 @@ const TodayScreen: React.FC = () => {
     return null;
   };
   const dueTasks = plants.filter((plant) => {
-    const intervalDays = plant.wateringIntervalDays ?? plant.wateringFrequencyDays;
+    const intervalDays = plant.wateringFrequencyDays ?? plant.wateringFrequencyDays;
     if (!intervalDays || intervalDays <= 0) return false;
     const nextDate = computeNextWateringDateForPlant(plant);
     if (!nextDate) return true;
@@ -366,7 +368,7 @@ const TodayScreen: React.FC = () => {
 
             {dueTasks.length === 0 ? (
               <View style={styles.taskEmptyState}>
-                <Text style={styles.taskEmptyTitle}>Nothing needs water</Text>
+                <Text style={styles.taskEmptyTitle}>No plants need to be watered today!</Text>
                 <Text style={styles.taskEmptyText}>Enjoy the calm — check in tomorrow.</Text>
               </View>
             ) : (
@@ -785,6 +787,11 @@ const styles = StyleSheet.create({
     color: colors.textMuted,
   },
   taskEmptyState: {
+    marginVertical: spacing.md,
+    padding: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    justifyContent: "center",
     gap: spacing.xs,
   },
   taskEmptyTitle: {
