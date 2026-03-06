@@ -202,7 +202,20 @@ const PlantDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
       const updatedPlant = await updatePlant(currentPlant.id, updates, auth.token);
 
       if (updatedPlant) {
-        setCurrentPlant(updatedPlant);
+        setCurrentPlant((prev) => ({
+          ...prev,
+          ...updatedPlant,
+          species: updatedPlant.species ?? prev.species,
+          speciesId: updatedPlant.speciesId ?? prev.speciesId,
+          wateringIntervalDays:
+            updatedPlant.wateringIntervalDays ??
+            updatedPlant.wateringFrequencyDays ??
+            prev.wateringIntervalDays,
+          wateringFrequencyDays:
+            updatedPlant.wateringFrequencyDays ??
+            updatedPlant.wateringIntervalDays ??
+            prev.wateringFrequencyDays,
+        }));
       } else {
         setCurrentPlant((prev) => ({
           ...prev,
@@ -320,25 +333,51 @@ const PlantDetailsScreen: React.FC<Props> = ({ route, navigation }) => {
       }
     }
 
-    const updates: PlantUpdate = {
-      name: trimmedName,
-      room: editDraft.room.trim(),
-      location: editDraft.location.trim(),
-      notes: editDraft.notes.trim(),
-      lastWateredAt: editDraft.lastWateredAt.trim() || null,
-    };
-
-    if (parsedInterval !== undefined) {
-      updates.wateringFrequencyDays = parsedInterval;
-    }
-
     const dateResult = normalizeDateInput(editDraft.lastWateredAt);
     if (dateResult.error) {
       showSnackbar({ message: "Enter a valid last watered date", type: "error", duration: 2000 });
       return;
     }
 
-    updates.lastWateredAt = dateResult.value;
+    const updates: PlantUpdate = {};
+    const currentName = currentPlant.name?.trim() ?? "";
+    const currentRoom = currentPlant.room?.trim() ?? "";
+    const currentLocation = currentPlant.location?.trim() ?? "";
+    const currentNotes = currentPlant.notes?.trim() ?? "";
+    const currentInterval =
+      currentPlant.wateringFrequencyDays ?? currentPlant.wateringIntervalDays;
+
+    const currentDateResult = normalizeDateInput(currentPlant.lastWateredAt ?? "");
+    const currentLastWateredAt = currentDateResult.value ?? null;
+
+    if (trimmedName !== currentName) {
+      updates.name = trimmedName;
+    }
+
+    if (editDraft.room.trim() !== currentRoom) {
+      updates.room = editDraft.room.trim();
+    }
+
+    if (editDraft.location.trim() !== currentLocation) {
+      updates.location = editDraft.location.trim();
+    }
+
+    if (editDraft.notes.trim() !== currentNotes) {
+      updates.notes = editDraft.notes.trim();
+    }
+
+    if (parsedInterval !== undefined && parsedInterval !== currentInterval) {
+      updates.wateringFrequencyDays = parsedInterval;
+    }
+
+    if (dateResult.value !== currentLastWateredAt) {
+      updates.lastWateredAt = dateResult.value;
+    }
+
+    if (Object.keys(updates).length === 0) {
+      showSnackbar({ message: "No changes to update", type: "info", duration: 2000 });
+      return;
+    }
 
     const success = await applyPlantUpdate(updates, "Plant updated");
     if (success) {

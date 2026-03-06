@@ -8,6 +8,7 @@ import { Ionicons } from "@expo/vector-icons";
 import { Species } from "../../api/species";
 import { savePlant } from "../../api/plants";
 import { useAuth } from "../../context/AuthContext";
+import { useSnackbar } from "../../context/SnackbarContext";
 import RoomChips from "../../components/RoomChips";
 import FormField from "../../components/FormField";
 
@@ -37,20 +38,88 @@ const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
   });
 
   const auth = useAuth();
+  const { showSnackbar } = useSnackbar();
 
-  const handleSavePlant = () => {
+  const padDatePart = (value: number): string => String(value).padStart(2, "0");
+
+  const isValidDateParts = (day: number, month: number, year: number): boolean => {
+    const date = new Date(year, month - 1, day);
+    return (
+      date.getFullYear() === year &&
+      date.getMonth() === month - 1 &&
+      date.getDate() === day
+    );
+  };
+
+  const normalizeDateInput = (
+    value: string,
+  ): { value: string | null; error?: string } => {
+    const trimmed = value.trim();
+    if (!trimmed) {
+      return { value: null };
+    }
+
+    const dayMonthYear = trimmed.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    if (dayMonthYear) {
+      const day = Number.parseInt(dayMonthYear[1], 10);
+      const month = Number.parseInt(dayMonthYear[2], 10);
+      const year = Number.parseInt(dayMonthYear[3], 10);
+      if (!isValidDateParts(day, month, year)) {
+        return { value: null, error: "Enter a valid date" };
+      }
+      return { value: `${year}-${padDatePart(month)}-${padDatePart(day)}` };
+    }
+
+    const isoDate = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoDate) {
+      const year = Number.parseInt(isoDate[1], 10);
+      const month = Number.parseInt(isoDate[2], 10);
+      const day = Number.parseInt(isoDate[3], 10);
+      if (!isValidDateParts(day, month, year)) {
+        return { value: null, error: "Enter a valid date" };
+      }
+      return { value: trimmed };
+    }
+
+    const parsed = new Date(trimmed);
+    if (!Number.isNaN(parsed.getTime())) {
+      return {
+        value: `${parsed.getFullYear()}-${padDatePart(parsed.getMonth() + 1)}-${padDatePart(parsed.getDate())}`,
+      };
+    }
+
+    return { value: null, error: "Enter a valid date" };
+  };
+
+  const handleSavePlant = async () => {
     console.log("Saving plant:", plant);
+    const dateResult = normalizeDateInput(plant.lastWateredAt);
+    if (dateResult.error) {
+      showSnackbar({ message: "Enter a valid last watered date", type: "error", duration: 2000 });
+      return;
+    }
     const plantToSave = {
       "name": plant.nickname,
       "speciesId": plant.speciesId,
       "room": plant.room,
       "location": plant.location,
       "wateringFrequencyDays": plant.wateringFrequencyDays,
-      "lastWateredAt": plant.lastWateredAt,
+      "lastWateredAt": dateResult.value,
       "notes": plant.notes,
     }
-    savePlant(plantToSave, auth.token)
-    navigation.navigate("PlantsList");
+    try {
+      await savePlant(plantToSave, auth.token);
+      navigation.navigate("PlantsList");
+    } catch (err) {
+      console.error("savePlant failed:", err);
+      const msg = err instanceof Error ? err.message : String(err);
+
+      if (msg.includes("401") || msg.includes("403")) {
+        auth.logout?.();
+      }
+
+      showSnackbar({ message: "Could not save plant. Please try again.", type: "error", duration: 2000 });
+    }
   }
 
   const updateDraft = <K extends keyof PlantDraft>(key: K, value: PlantDraft[K]) => {
@@ -200,7 +269,11 @@ const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
             placeholder={`${species.defaultWateringIntervalDays} (species default)`}
             keyboardType="numeric"
             inputMode="numeric"
-            value={plant.wateringFrequencyDays.toString()}
+            value={
+              plant.wateringFrequencyDays !== undefined && plant.wateringFrequencyDays !== null
+                ? String(plant.wateringFrequencyDays)
+                : ""
+            }
             onChangeText={(text) =>
               updateDraft("wateringFrequencyDays", Number(text) || 0)
             }
@@ -208,7 +281,7 @@ const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
 
           <FormField
             label="Last watered at"
-            placeholder="YYYY-MM-DD (tap to pick a date)"
+            placeholder="DD-MM-YYYY"
             inputMode="numeric"
             value={plant.lastWateredAt}
             onChangeText={(text) => updateDraft("lastWateredAt", text)}
