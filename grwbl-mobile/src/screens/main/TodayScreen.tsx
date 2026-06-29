@@ -29,6 +29,12 @@ type ScheduledPlant = {
   isOverdue: boolean;
 };
 
+const getPlantDisplayName = (plant: Plant) =>
+  plant.name?.trim() ||
+  plant.species?.commonName ||
+  plant.species?.scientificName ||
+  "Unnamed plant";
+
 const startOfDay = (date: Date) => {
   const next = new Date(date);
   next.setHours(0, 0, 0, 0);
@@ -79,6 +85,10 @@ const TodayScreen: React.FC = () => {
   const [snoozeError, setSnoozeError] = React.useState<string | null>(null);
   const [snoozedOffsets, setSnoozedOffsets] = React.useState<Record<string, number>>({});
   const [wateringPlantIds, setWateringPlantIds] = React.useState<Record<string, boolean>>({});
+  const [isBulkWaterModalVisible, setIsBulkWaterModalVisible] = React.useState(false);
+  const [selectedBulkPlantIds, setSelectedBulkPlantIds] = React.useState<string[]>([]);
+  const [isBulkWaterSubmitting, setIsBulkWaterSubmitting] = React.useState(false);
+  const [bulkWaterError, setBulkWaterError] = React.useState<string | null>(null);
 
   const auth = useAuth();
   const { showSnackbar } = useSnackbar();
@@ -158,6 +168,21 @@ const TodayScreen: React.FC = () => {
 
   const visibleTasks = dueTasks.slice(0, 3);
   const remainingTasks = Math.max(dueTasks.length - visibleTasks.length, 0);
+  const dueTaskIds = React.useMemo(() => new Set(dueTasks.map((plant) => plant.id)), [dueTasks]);
+  const sortedPlants = React.useMemo(
+    () =>
+      [...plants].sort((left, right) => {
+        const leftIsDue = dueTaskIds.has(left.id);
+        const rightIsDue = dueTaskIds.has(right.id);
+
+        if (leftIsDue !== rightIsDue) {
+          return leftIsDue ? -1 : 1;
+        }
+
+        return getPlantDisplayName(left).localeCompare(getPlantDisplayName(right));
+      }),
+    [dueTaskIds, plants],
+  );
 
   const dueTodayCount = scheduledPlants.filter(({ nextDate }) => isSameDay(nextDate, today)).length;
 
@@ -278,12 +303,117 @@ const TodayScreen: React.FC = () => {
     ]);
   };
 
-  const handleBulkWater = () => {
-    showSnackbar({
-      message: "Bulk watering mode coming soon.",
-      type: "info",
-      duration: 2000,
-    });
+  const openBulkWaterModal = () => {
+    if (plants.length === 0) {
+      return;
+    }
+    setBulkWaterError(null);
+    setSelectedBulkPlantIds([]);
+    setIsBulkWaterModalVisible(true);
+  };
+
+  const closeBulkWaterModal = () => {
+    if (isBulkWaterSubmitting) {
+      return;
+    }
+    setIsBulkWaterModalVisible(false);
+    setBulkWaterError(null);
+  };
+
+  const toggleBulkPlantSelection = (plantId: string) => {
+    if (isBulkWaterSubmitting) {
+      return;
+    }
+
+    setSelectedBulkPlantIds((current) =>
+      current.includes(plantId)
+        ? current.filter((id) => id !== plantId)
+        : [...current, plantId],
+    );
+  };
+
+  const handleBulkWater = async () => {
+    if (!auth.token || isBulkWaterSubmitting) {
+      return;
+    }
+
+    if (selectedBulkPlantIds.length === 0) {
+      setBulkWaterError("Select at least one plant to continue.");
+      return;
+    }
+
+    setIsBulkWaterSubmitting(true);
+    setBulkWaterError(null);
+
+    const wateredAt = new Date().toISOString();
+    const succeededWaterings = new Map<string, string>();
+    const failedPlantNames: string[] = [];
+
+    try {
+      for (const plantId of selectedBulkPlantIds) {
+        const plant = plants.find((entry) => entry.id === plantId);
+        if (!plant) {
+          continue;
+        }
+
+        try {
+          const response = await waterPlant(plantId, wateredAt, auth.token);
+          succeededWaterings.set(response.plantId, response.wateredAt ?? wateredAt);
+        } catch (error) {
+          console.error("bulk waterPlant failed:", error);
+          const message = error instanceof Error ? error.message : String(error);
+          if (message.includes("401") || message.includes("403")) {
+            auth.logout?.();
+            setBulkWaterError("Your session expired. Please sign in again.");
+            return;
+          }
+          failedPlantNames.push(getPlantDisplayName(plant));
+        }
+      }
+
+      if (succeededWaterings.size > 0) {
+        setPlants((current) =>
+          current.map((entry) =>
+            succeededWaterings.has(entry.id)
+              ? { ...entry, lastWateredAt: succeededWaterings.get(entry.id) ?? wateredAt }
+              : entry,
+          ),
+        );
+        setSnoozedOffsets((current) => {
+          const next = { ...current };
+          succeededWaterings.forEach((_, plantId) => {
+            delete next[plantId];
+          });
+          return next;
+        });
+      }
+
+      if (failedPlantNames.length === 0) {
+        setIsBulkWaterModalVisible(false);
+        setSelectedBulkPlantIds([]);
+        showSnackbar({
+          message: `Watered ${succeededWaterings.size} plant${succeededWaterings.size === 1 ? "" : "s"}.`,
+          type: "success",
+          duration: 2200,
+        });
+        return;
+      }
+
+      if (succeededWaterings.size > 0) {
+        setIsBulkWaterModalVisible(false);
+        setSelectedBulkPlantIds([]);
+        showSnackbar({
+          message: `Watered ${succeededWaterings.size} plant${succeededWaterings.size === 1 ? "" : "s"}. ${failedPlantNames.length} failed.`,
+          type: "info",
+          duration: 3000,
+        });
+        return;
+      }
+
+      setBulkWaterError("Could not water the selected plants. Please try again.");
+    } finally {
+      setIsBulkWaterSubmitting(false);
+    }
   };
 
   const openSnoozeModal = () => {
@@ -355,8 +485,8 @@ const TodayScreen: React.FC = () => {
       id: "bulk-water",
       label: "Bulk water",
       icon: "checkmark-done-outline",
-      onPress: handleBulkWater,
-      disabled: !hasDueTasks,
+      onPress: openBulkWaterModal,
+      disabled: plants.length === 0,
     },
     {
       id: "snooze",
@@ -605,6 +735,123 @@ const TodayScreen: React.FC = () => {
           <QuickActionsDock actions={dockActions} overflowAction={overflowAction} />
         </ScrollView>
       )}
+
+      <Modal
+        visible={isBulkWaterModalVisible}
+        transparent
+        animationType="slide"
+        statusBarTranslucent
+        onRequestClose={closeBulkWaterModal}
+      >
+        <Pressable style={styles.sheetBackdrop} onPress={closeBulkWaterModal}>
+          <Pressable style={styles.sheetCard} onPress={() => {}}>
+            <View style={styles.sheetHeader}>
+              <View>
+                <Text style={styles.sheetTitle}>Bulk water</Text>
+                <Text style={styles.sheetSubtitle}>Select the plants you want to mark as watered</Text>
+              </View>
+              <TouchableOpacity
+                style={styles.sheetClose}
+                onPress={closeBulkWaterModal}
+                activeOpacity={0.85}
+                accessibilityRole="button"
+                accessibilityLabel="Close"
+                disabled={isBulkWaterSubmitting}
+              >
+                <Ionicons name="close" size={18} color={colors.textMuted} />
+              </TouchableOpacity>
+            </View>
+
+            <ScrollView style={styles.bulkList} contentContainerStyle={styles.bulkListContent}>
+              {sortedPlants.map((plant) => {
+                const isSelected = selectedBulkPlantIds.includes(plant.id);
+                const locationLabel = [plant.room, plant.location].filter(Boolean).join(" · ");
+                const nextDate = computeNextWateringDateForPlant(plant);
+                const isOverdue = nextDate ? nextDate < today : false;
+                const isDueToday = nextDate ? isSameDay(nextDate, today) : false;
+                const rowTone = isOverdue ? "overdue" : isDueToday || dueTaskIds.has(plant.id) ? "due" : "normal";
+
+                return (
+                  <Pressable
+                    key={plant.id}
+                    onPress={() => toggleBulkPlantSelection(plant.id)}
+                    style={({ pressed }) => [
+                      styles.bulkRow,
+                      rowTone === "overdue" && styles.bulkRowOverdue,
+                      rowTone === "due" && styles.bulkRowDue,
+                      isSelected && styles.bulkRowSelected,
+                      pressed && styles.bulkRowPressed,
+                    ]}
+                    accessibilityRole="checkbox"
+                    accessibilityState={{ checked: isSelected }}
+                    disabled={isBulkWaterSubmitting}
+                  >
+                    <View style={styles.bulkRowText}>
+                      <View style={styles.bulkRowTopLine}>
+                        <View style={styles.bulkTitleWrap}>
+                          <View
+                            style={[
+                              styles.bulkStatusDot,
+                              rowTone === "overdue" && styles.bulkStatusDotOverdue,
+                              rowTone === "due" && styles.bulkStatusDotDue,
+                            ]}
+                          />
+                          <Text style={styles.bulkRowTitle} numberOfLines={1}>
+                            {getPlantDisplayName(plant)}
+                          </Text>
+                        </View>
+                      </View>
+                      <Text style={styles.bulkRowSubtitle} numberOfLines={1}>
+                        {locationLabel || plant.species?.commonName || "No room set"}
+                      </Text>
+                    </View>
+                    <View
+                      style={[
+                        styles.bulkSelectionMark,
+                        !isSelected && rowTone === "overdue" && styles.bulkSelectionMarkOverdue,
+                        !isSelected && rowTone === "due" && styles.bulkSelectionMarkDue,
+                        isSelected && rowTone === "overdue" && styles.bulkSelectionMarkSelectedOverdue,
+                        isSelected && rowTone === "due" && styles.bulkSelectionMarkSelectedDue,
+                        isSelected && rowTone === "normal" && styles.bulkSelectionMarkSelectedNeutral,
+                      ]}
+                    />
+                  </Pressable>
+                );
+              })}
+            </ScrollView>
+
+            {bulkWaterError ? <Text style={styles.sheetError}>{bulkWaterError}</Text> : null}
+
+            <View style={styles.bulkFooter}>
+              <TouchableOpacity
+                style={styles.bulkCancelButton}
+                onPress={closeBulkWaterModal}
+                activeOpacity={0.85}
+                disabled={isBulkWaterSubmitting}
+              >
+                <Text style={styles.bulkCancelButtonText}>Cancel</Text>
+              </TouchableOpacity>
+              <TouchableOpacity
+                style={[
+                  styles.bulkConfirmButton,
+                  (selectedBulkPlantIds.length === 0 || isBulkWaterSubmitting) && styles.bulkConfirmButtonDisabled,
+                ]}
+                onPress={() => void handleBulkWater()}
+                activeOpacity={0.85}
+                disabled={selectedBulkPlantIds.length === 0 || isBulkWaterSubmitting}
+              >
+                {isBulkWaterSubmitting ? (
+                  <ActivityIndicator color={colors.background} />
+                ) : (
+                  <Text style={styles.bulkConfirmButtonText}>
+                    Water {selectedBulkPlantIds.length > 0 ? `(${selectedBulkPlantIds.length})` : ""}
+                  </Text>
+                )}
+              </TouchableOpacity>
+            </View>
+          </Pressable>
+        </Pressable>
+      </Modal>
 
       <Modal
         visible={isSnoozeModalVisible}
@@ -998,6 +1245,136 @@ const styles = StyleSheet.create({
     marginTop: spacing.lg,
     borderTopWidth: 1,
     borderTopColor: colors.border,
+  },
+  bulkList: {
+    marginTop: spacing.lg,
+    maxHeight: 380,
+  },
+  bulkListContent: {
+    gap: spacing.sm,
+  },
+  bulkRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: "#dfe7e1",
+    backgroundColor: "#fbfcfb",
+  },
+  bulkRowOverdue: {
+    borderColor: "#f3d2d2",
+    backgroundColor: "#fff8f8",
+  },
+  bulkRowDue: {
+    borderColor: "#d7e9dc",
+    backgroundColor: "#f7fcf8",
+  },
+  bulkRowPressed: {
+    backgroundColor: "#f4f7f4",
+  },
+  bulkRowSelected: {
+    backgroundColor: "#edf7f0",
+    boxShadow: boxShadows.sm,
+  },
+  bulkRowText: {
+    flex: 1,
+  },
+  bulkRowTopLine: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    gap: spacing.sm,
+  },
+  bulkTitleWrap: {
+    flex: 1,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+  },
+  bulkRowTitle: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.text,
+    flex: 1,
+  },
+  bulkRowSubtitle: {
+    marginTop: 2,
+    fontSize: 12,
+    color: colors.textMuted,
+  },
+  bulkStatusDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: "#cfd9d1",
+  },
+  bulkStatusDotDue: {
+    backgroundColor: colors.primary,
+  },
+  bulkStatusDotOverdue: {
+    backgroundColor: colors.error,
+  },
+  bulkSelectionMark: {
+    width: 10,
+    height: 36,
+    borderRadius: radius.pill,
+    backgroundColor: "#e6ece7",
+    alignSelf: "center",
+  },
+  bulkSelectionMarkDue: {
+    backgroundColor: "#cfe8d6",
+  },
+  bulkSelectionMarkOverdue: {
+    backgroundColor: "#f0c9c9",
+  },
+  bulkSelectionMarkSelectedOverdue: {
+    backgroundColor: colors.error,
+  },
+  bulkSelectionMarkSelectedDue: {
+    backgroundColor: colors.primary,
+  },
+  bulkSelectionMarkSelectedNeutral: {
+    backgroundColor: "#7aa98a",
+  },
+  bulkFooter: {
+    flexDirection: "row",
+    gap: spacing.sm,
+    marginTop: spacing.lg,
+  },
+  bulkCancelButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.surface,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bulkCancelButtonText: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.text,
+  },
+  bulkConfirmButton: {
+    flex: 1,
+    minHeight: 48,
+    borderRadius: radius.md,
+    backgroundColor: colors.primary,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  bulkConfirmButtonDisabled: {
+    opacity: 0.5,
+  },
+  bulkConfirmButtonText: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.background,
   },
   sheetRow: {
     paddingVertical: spacing.sm,
