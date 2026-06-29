@@ -1,134 +1,177 @@
-import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import React, { useState } from "react";
+import React from "react";
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
+  ScrollView,
 } from "react-native";
-import Header from "../../components/Header";
+import { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AuthStackParamList } from "../../navigation/AuthStackNavigator";
-import { colors, spacing, radius, boxShadows } from "../../theme";
+import { colors, spacing } from "../../theme";
 import { useAuth } from "../../context/AuthContext";
 import { useSnackbar } from "../../context/SnackbarContext";
-import FormField from "../../components/FormField";
+import {
+  AuthFormCard,
+  AuthHeroCard,
+  AuthSwitchLink,
+  AuthTextInput,
+  PrimaryButton,
+} from "./components/AuthUI";
 
 type Props = NativeStackScreenProps<AuthStackParamList, "Register">;
 
 const RegisterScreen: React.FC<Props> = ({ navigation }) => {
+  const insets = useSafeAreaInsets();
   const { register } = useAuth();
-
-  const [name, setName] = useState("");
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [confirmPassword, setConfirmPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [successfulRequest, setSuccessfulRequest] = useState(false);
-
   const { showSnackbar } = useSnackbar();
+
+  const [name, setName] = React.useState("");
+  const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [confirmPassword, setConfirmPassword] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [formError, setFormError] = React.useState<string | null>(null);
+
+  const mapRegisterError = (value: unknown): string => {
+    const fallback = "We couldn't create your account right now. Please try again.";
+    if (!value || typeof value !== "object") return fallback;
+
+    const err = value as { status?: number; errorMessage?: string; message?: string; errorType?: string };
+    const raw = (err.errorMessage ?? err.message ?? "").toLowerCase();
+
+    if (raw.includes("already") || raw.includes("exists") || raw.includes("duplicate")) {
+      return "This email is already registered.";
+    }
+
+    if (raw.includes("validation") || err.status === 400 || err.errorType === "validation") {
+      return "Please check your details and try again.";
+    }
+
+    return fallback;
+  };
 
   const handleRegister = async () => {
     if (loading) return;
-    setLoading(true);    // Implement registration logic here
-    console.info("Register pressed", { name, email, password, confirmPassword });
-    if (password !== confirmPassword) {
-      console.warn("Passwords do not match");
+
+    const trimmedName = name.trim();
+    const trimmedEmail = email.trim();
+
+    if (!trimmedName || !trimmedEmail || !password.trim() || !confirmPassword.trim()) {
+      setFormError("Please fill in all fields.");
       return;
     }
+
+    if (password !== confirmPassword) {
+      setFormError("Passwords do not match.");
+      return;
+    }
+
+    setLoading(true);
+    setFormError(null);
+
     try {
-      register(name, email, password)
-        .then(() => {
-          console.log("Registration successful");
-          showSnackbar({
-            message: "Registration successful! Please log in.",
-            type: "success",
-            duration: 2000,
-          });
-          setTimeout(() => {
-            navigation.navigate("Login");
-          }, 2000);
-        })
-        .catch((error) => {
-          console.log("Registration failed:", error);
-          showSnackbar({
-            message: error?.message || `Registration failed. ${error.errorMessage}.`,
-            type: "error",
-            duration: 2000,
-          });
-        });
-    } catch (error) {
-      console.error("Unexpected error during registration:", error);
+      await register(trimmedName, trimmedEmail, password);
       showSnackbar({
-        message: "An unexpected error occurred. Please try again.",
-        type: "error",
+        message: "Account created. Please sign in.",
+        type: "success",
         duration: 2000,
+      });
+      navigation.navigate("Login");
+    } catch (error) {
+      const friendlyMessage = mapRegisterError(error);
+      setFormError(friendlyMessage);
+      showSnackbar({
+        message: friendlyMessage,
+        type: "error",
+        duration: 2300,
       });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleNavigateToLogin = () => {
-    navigation.navigate("Login");
-  };
-
   return (
     <View style={styles.container}>
-      <Header title="Create account" showBackButton={false} showLogo={true} hide={false} />
-
       <KeyboardAvoidingView
-        style={styles.content}
+        style={styles.keyboardWrap}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        {/* <Text style={styles.title}>Register</Text> */}
-        <Text style={styles.subtitle}>Create an account to sync your plants across devices.</Text>
-
-        <View style={styles.card}>
-          <FormField
-            label="Full name"
-            value={name}
-            onChangeText={setName}
-            placeholder="Your name"
-            autoCapitalize="words"
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: insets.top + spacing.md, paddingBottom: insets.bottom + 88 },
+          ]}
+        >
+          <AuthHeroCard
+            title="Start your plant collection"
+            body="Track watering, rooms, notes, and reminders."
+            icon="leaf-outline"
           />
 
-          <FormField
-            label="Email"
-            value={email}
-            onChangeText={setEmail}
-            placeholder="you@domain.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
-          />
+          <AuthFormCard>
+            <AuthTextInput
+              label="Full name"
+              leftIcon="person-outline"
+              value={name}
+              onChangeText={setName}
+              placeholder="Your name"
+              autoCapitalize="words"
+              textContentType="name"
+            />
 
-          <FormField
-            label="Password"
-            value={password}
-            onChangeText={setPassword}
-            placeholder="Choose a password"
-            secureTextEntry
-          />
+            <AuthTextInput
+              label="Email"
+              leftIcon="mail-outline"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@domain.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="emailAddress"
+            />
 
-          <FormField
-            label="Confirm password"
-            value={confirmPassword}
-            onChangeText={setConfirmPassword}
-            placeholder="Repeat password"
-            secureTextEntry
-          />
+            <AuthTextInput
+              label="Password"
+              leftIcon="lock-closed-outline"
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Choose a password"
+              secureTextEntry
+              secureToggle
+              textContentType="newPassword"
+              autoCapitalize="none"
+              autoCorrect={false}
+            />
 
-          <TouchableOpacity style={loading ? styles.buttonDisabled : styles.button} disabled={loading} onPress={handleRegister}>
-            <Text style={styles.buttonText}>{loading ? "" : "Create Account"}</Text>
-            {loading && <ActivityIndicator color={colors.primary} />}
-          </TouchableOpacity>
+            <AuthTextInput
+              label="Confirm password"
+              leftIcon="lock-closed-outline"
+              value={confirmPassword}
+              onChangeText={setConfirmPassword}
+              placeholder="Repeat password"
+              secureTextEntry
+              secureToggle
+              textContentType="password"
+              autoCapitalize="none"
+              autoCorrect={false}
+              errorText={formError ?? undefined}
+            />
 
-          <TouchableOpacity onPress={handleNavigateToLogin} style={styles.linkWrap}>
-            <Text style={styles.linkText}>Already have an account? Sign in</Text>
-          </TouchableOpacity>
-        </View>
+            <PrimaryButton label="Create account" loading={loading} onPress={handleRegister} />
+
+            <AuthSwitchLink
+              text="Already have an account?"
+              actionText="Sign in"
+              onPress={() => navigation.navigate("Login")}
+            />
+          </AuthFormCard>
+        </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
@@ -140,64 +183,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     paddingTop: spacing.xs,
   },
-  content: {
+  keyboardWrap: {
     flex: 1,
+  },
+  scrollContent: {
     paddingHorizontal: spacing.md,
     paddingTop: spacing.lg,
-    alignItems: "flex-start",
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: "700",
-    color: colors.primary,
-    marginBottom: spacing.xs,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.textMuted,
-    marginBottom: spacing.lg,
-    textAlign: "center",
-  },
-  card: {
-    width: "100%",
-    maxWidth: 520,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    boxShadow: boxShadows.md,
-  },
-  button: {
-    flexDirection: "row",
-    marginTop: spacing.sm,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    backgroundColor: colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  buttonDisabled: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: spacing.sm,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    backgroundColor: colors.buttonDisabled,
-  },
-  buttonText: {
-    color: colors.background,
-    fontWeight: "600",
-  },
-  linkWrap: {
-    marginTop: spacing.sm,
-    alignItems: "center",
-  },
-  linkText: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: "600",
   },
 });
 

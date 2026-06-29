@@ -1,110 +1,127 @@
-
-import React, { useState } from "react";
+import React from "react";
 import {
   View,
   Text,
   StyleSheet,
-  TouchableOpacity,
   KeyboardAvoidingView,
   Platform,
-  ActivityIndicator,
+  ScrollView,
 } from "react-native";
-import Header from "../../components/Header";
-import { colors, spacing, radius, boxShadows } from "../../theme";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
-import { PlantsStackParamList } from "../../navigation/PlantsStackNavigator";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import { colors, spacing } from "../../theme";
 import { AuthStackParamList } from "../../navigation/AuthStackNavigator";
 import { useAuth } from "../../context/AuthContext";
 import { useSnackbar } from "../../context/SnackbarContext";
 import { LoginRequestError } from "../../api/auth";
-import FormField from "../../components/FormField";
-
+import {
+  AuthFormCard,
+  AuthHeroCard,
+  AuthSwitchLink,
+  AuthTextInput,
+  PrimaryButton,
+} from "./components/AuthUI";
 
 type Props = NativeStackScreenProps<AuthStackParamList, "Login">;
 
 const LoginScreen: React.FC<Props> = ({ navigation }) => {
+  const insets = useSafeAreaInsets();
   const { login } = useAuth();
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<boolean>(false);
-
   const { showSnackbar } = useSnackbar();
+
+  const [email, setEmail] = React.useState("");
+  const [password, setPassword] = React.useState("");
+  const [loading, setLoading] = React.useState(false);
+  const [formError, setFormError] = React.useState<string | null>(null);
 
   const handleLogin = async () => {
     if (loading) return;
+
+    const trimmedEmail = email.trim();
+    if (!trimmedEmail || !password.trim()) {
+      setFormError("Please enter your email and password.");
+      return;
+    }
+
     setLoading(true);
+    setFormError(null);
 
     try {
-      await login(email, password);
-    } catch (err: any) {
+      await login(trimmedEmail, password);
+    } catch (err) {
       const typedErr = err as LoginRequestError;
+      const credentialsError = typedErr?.errorType === "credentials";
+      const message = credentialsError
+        ? "That email or password doesn't look right."
+        : "Could not connect right now. Please try again.";
 
-      if (typedErr?.errorType === "credentials") {
-        showSnackbar({
-          message: typedErr.errorMessage || "Wrong email or password.",
-          type: "error",
-          duration: 2000,
-
-        });
-      } else {
-        showSnackbar({
-          message: typedErr?.errorMessage || "Could not connect. Please try again.",
-          type: "error",
-          duration: 2000,
-
-        });
-      }
+      setFormError(message);
+      showSnackbar({
+        message,
+        type: "error",
+        duration: 2200,
+      });
     } finally {
       setLoading(false);
     }
   };
 
-  const handleNavigateToRegister = () => {
-    navigation.navigate("Register");
-  };
-
   return (
     <View style={styles.container}>
-      <Header title="Welcome" showBackButton={false} showLogo={true} hide={false} />
-
       <KeyboardAvoidingView
-        style={styles.content}
+        style={styles.keyboardWrap}
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
-        {/* <Text style={styles.title}>Sign in</Text> */}
-        <Text style={styles.subtitle}>Sign in to sync your plants and tasks.</Text>
-
-        <View style={styles.card}>
-          <FormField
-            label="Email"
-            value={email}
-            onChangeText={setEmail}
-            placeholder="you@domain.com"
-            keyboardType="email-address"
-            autoCapitalize="none"
+        <ScrollView
+          keyboardShouldPersistTaps="handled"
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.scrollContent,
+            { paddingTop: insets.top + spacing.md, paddingBottom: insets.bottom + 88 },
+          ]}
+        >
+          <AuthHeroCard
+            title="Welcome back"
+            body="Your green buddies missed you."
+            icon="water-outline"
           />
 
-          <FormField
-            label="Password"
-            value={password}
-            onChangeText={setPassword}
-            placeholder="••••••••"
-            secureTextEntry
-          />
+          <AuthFormCard>
+            <AuthTextInput
+              label="Email"
+              leftIcon="mail-outline"
+              value={email}
+              onChangeText={setEmail}
+              placeholder="you@domain.com"
+              keyboardType="email-address"
+              autoCapitalize="none"
+              autoCorrect={false}
+              textContentType="emailAddress"
+            />
 
-          <TouchableOpacity style={loading ? styles.buttonDisabled : styles.button} disabled={loading} onPress={handleLogin}>
-            <Text style={styles.buttonText}>{loading ? "" : "Log in"}</Text>
-            {loading && <ActivityIndicator color={colors.primary} />}
-          </TouchableOpacity>
+            <AuthTextInput
+              label="Password"
+              leftIcon="lock-closed-outline"
+              value={password}
+              onChangeText={setPassword}
+              placeholder="Password"
+              secureTextEntry
+              secureToggle
+              textContentType="password"
+              autoCapitalize="none"
+              autoCorrect={false}
+              errorText={formError ?? undefined}
+            />
 
-          <TouchableOpacity
-            onPress={() => handleNavigateToRegister()}
-            style={styles.linkWrap}
-          >
-            <Text style={styles.linkText}>Don’t have an account? Register</Text>
-          </TouchableOpacity>
-        </View>
+            <PrimaryButton label="Log in" loading={loading} onPress={handleLogin} />
+
+            <AuthSwitchLink
+              text="Don't have an account?"
+              actionText="Register"
+              onPress={() => navigation.navigate("Register")}
+            />
+          </AuthFormCard>
+        </ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
@@ -116,64 +133,12 @@ const styles = StyleSheet.create({
     backgroundColor: colors.background,
     paddingTop: spacing.xs,
   },
-  content: {
+  keyboardWrap: {
     flex: 1,
+  },
+  scrollContent: {
     paddingHorizontal: spacing.md,
     paddingTop: spacing.lg,
-    alignItems: "flex-start",
-  },
-  title: {
-    fontSize: 26,
-    fontWeight: "700",
-    color: colors.primary,
-    marginBottom: spacing.xs,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.textMuted,
-    marginBottom: spacing.lg,
-    textAlign: "center",
-  },
-  card: {
-    width: "100%",
-    maxWidth: 520,
-    backgroundColor: colors.surface,
-    borderRadius: radius.md,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: colors.border,
-    boxShadow: boxShadows.md,
-  },
-  button: {
-    flexDirection: "row",
-    marginTop: spacing.sm,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    backgroundColor: colors.primary,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  buttonDisabled: {
-    flexDirection: "row",
-    alignItems: "center",
-    justifyContent: "center",
-    marginTop: spacing.sm,
-    paddingVertical: spacing.sm,
-    borderRadius: radius.pill,
-    backgroundColor: colors.buttonDisabled,
-  },
-  buttonText: {
-    color: colors.background,
-    fontWeight: "600",
-  },
-  linkWrap: {
-    marginTop: spacing.sm,
-    alignItems: "center",
-  },
-  linkText: {
-    color: colors.primary,
-    fontSize: 13,
-    fontWeight: "600",
   },
 });
 

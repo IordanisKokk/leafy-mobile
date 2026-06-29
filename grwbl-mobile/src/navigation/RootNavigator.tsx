@@ -5,8 +5,12 @@ import MainTabNavigator from "./MainTabNavigator";
 import { useAuth } from "../context/AuthContext";
 
 const RootNavigator: React.FC = () => {
-  const { token } = useAuth();
+  const { token, isHydrating } = useAuth();
   const isLoggedIn = !!token;
+
+  if (isHydrating) {
+    return null;
+  }
 
   return (
     <NavigationContainer>
