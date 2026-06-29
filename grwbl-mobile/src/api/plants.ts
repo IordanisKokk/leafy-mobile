@@ -5,8 +5,24 @@ export type PlantSpecies = {
     commonName: string;
     scientificName: string;
     description?: string;
+    defaultWateringIntervalDays?: number;
+    // Backward compatible alias if the backend returns this key
     defaultwateringFrequencyDays?: number;
     imageUrl?: string;
+    properties?: {
+        growthRate?: "slow" | "medium" | "fast";
+        nativeRegion?: string;
+        isToxicToPets?: boolean;
+        matureHeightCm?: number;
+    };
+    careInstructions?: {
+        soil?: string;
+        light?: string;
+        notes?: string;
+        humidity?: string;
+        fertilizer?: string;
+        temperatureC?: string;
+    };
 };
 
 export type Plant = {
@@ -18,6 +34,7 @@ export type Plant = {
     room?: string;
     location?: string;
     wateringFrequencyDays?: number;
+    wateringIntervalDays?: number;
     lastWateredAt?: string | null;
     notes?: string;
 }
@@ -28,8 +45,19 @@ export type PlantUpdate = {
     room?: string;
     location?: string;
     wateringFrequencyDays?: number;
+    wateringIntervalDays?: number;
     lastWateredAt?: string | null;
     notes?: string;
+};
+
+export type WaterPlantResponse = {
+    plantId: string;
+    wateredAt: string;
+};
+
+export type WateringHistoryEntry = {
+    id: string;
+    timestamp: string;
 };
 
 export const fetchPlants = async (authToken: string | null): Promise<Plant[]> => {
@@ -108,4 +136,49 @@ export const deletePlant = async (
     if (!response.ok) {
         throw new Error(`Failed to delete plant: ${response.status}`);
     }
+}
+
+export const waterPlant = async (
+    plantId: string,
+    wateredAt: string,
+    authToken: string | null,
+): Promise<WaterPlantResponse> => {
+    if (!authToken) {
+        throw new Error("No auth token provided");
+    }
+
+    const response = await post<WaterPlantResponse>(`/plants/${plantId}/water`, {
+        wateredAt,
+    }, {
+        headers: {
+            Authorization: `Bearer ${authToken}`,
+        },
+    });
+
+    if (!response.ok || !response.data) {
+        throw new Error(`Failed to water plant: ${response.status}`);
+    }
+
+    return response.data;
+}
+
+export const fetchWateringHistory = async (
+    plantId: string,
+    authToken: string | null,
+): Promise<WateringHistoryEntry[]> => {
+    if (!authToken) {
+        throw new Error("No auth token provided");
+    }
+
+    const response = await get<WateringHistoryEntry[]>(`/plants/${plantId}/watering-history`, {
+        headers: {
+            Authorization: `Bearer ${authToken}`,
+        },
+    });
+
+    if (!response.ok) {
+        throw new Error(`Failed to fetch watering history: ${response.status}`);
+    }
+
+    return Array.isArray(response.data) ? response.data : [];
 }

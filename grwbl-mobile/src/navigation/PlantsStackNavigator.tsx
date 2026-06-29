@@ -5,7 +5,7 @@ import PlantsListScreen from "../screens/plants/PlantsListScreen";
 import SelectSpeciesScreen from "../screens/plants/SelectSpeciesScreen";
 import PlantFormScreen from "../screens/plants/PlantFormScreen";
 import PlantDetailsScreen from "../screens/plants/PlantDetailsScreen";
-import { colors, spacing, radius } from "../theme";
+import { colors } from "../theme";
 import { Species } from "../api/species";
 import { Plant } from "../api/plants";
 
@@ -25,7 +25,8 @@ const PlantsStackNavigator: React.FC = () => {
       screenOptions={{
         headerShown: false,
         animation: "slide_from_right",
-        contentStyle: { backgroundColor: colors.background }
+        gestureEnabled: true,
+        contentStyle: { backgroundColor: colors.background },
       }}
     >
       <Stack.Screen
@@ -38,17 +39,17 @@ const PlantsStackNavigator: React.FC = () => {
       <Stack.Screen
         name="SelectSpecies"
         component={SelectSpeciesScreen}
-        options={{ title: "Select species" }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="PlantForm"
         component={PlantFormScreen}
-        options={{ title: "New plant" }}
+        options={{ headerShown: false }}
       />
       <Stack.Screen
         name="PlantDetails"
         component={PlantDetailsScreen}
-        options={{ title: "Plant" }}
+        options={{ headerShown: false }}
       />
     </Stack.Navigator>
   );

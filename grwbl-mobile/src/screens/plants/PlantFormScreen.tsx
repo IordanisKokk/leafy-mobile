@@ -1,10 +1,11 @@
-import React, { useState } from "react";
-import { View, Text, StyleSheet, Image, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity } from "react-native";
+import React, { useEffect, useState } from "react";
+import { View, Text, StyleSheet, Image, ScrollView, KeyboardAvoidingView, Platform, TouchableOpacity, Pressable, Modal } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PlantsStackParamList } from "../../navigation/PlantsStackNavigator";
 import { boxShadows, colors, radius, spacing } from "../../theme";
-import Header from "../../components/Header";
 import { Ionicons } from "@expo/vector-icons";
+import DateTimePicker, { DateTimePickerEvent } from "@react-native-community/datetimepicker";
 import { Species } from "../../api/species";
 import { savePlant } from "../../api/plants";
 import { useAuth } from "../../context/AuthContext";
@@ -25,7 +26,11 @@ type PlantDraft = {
 };
 
 const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
+  const insets = useSafeAreaInsets();
   const [selectedRoom, setSelectedRoom] = useState<string>("");
+  const [showAndroidLastWateredPicker, setShowAndroidLastWateredPicker] = useState(false);
+  const [isIosLastWateredSheetVisible, setIsIosLastWateredSheetVisible] = useState(false);
+  const [lastWateredPickerDate, setLastWateredPickerDate] = useState<Date>(new Date());
   const { species } = route.params;
   const [plant, setPlant] = useState<PlantDraft>({
     nickname: "",
@@ -41,6 +46,32 @@ const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
   const { showSnackbar } = useSnackbar();
 
   const padDatePart = (value: number): string => String(value).padStart(2, "0");
+  const formatDateForInput = (date: Date): string =>
+    `${padDatePart(date.getDate())}-${padDatePart(date.getMonth() + 1)}-${date.getFullYear()}`;
+
+  const parseDraftDate = (value: string): Date => {
+    const trimmed = value.trim();
+    if (!trimmed) return new Date();
+
+    const dayMonthYear = trimmed.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+    if (dayMonthYear) {
+      const day = Number.parseInt(dayMonthYear[1], 10);
+      const month = Number.parseInt(dayMonthYear[2], 10);
+      const year = Number.parseInt(dayMonthYear[3], 10);
+      const parsed = new Date(year, month - 1, day);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+
+    const isoDate = trimmed.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+    if (isoDate) {
+      const parsed = new Date(trimmed);
+      if (!Number.isNaN(parsed.getTime())) return parsed;
+    }
+
+    const fallback = new Date(trimmed);
+    if (!Number.isNaN(fallback.getTime())) return fallback;
+    return new Date();
+  };
 
   const isValidDateParts = (day: number, month: number, year: number): boolean => {
     const date = new Date(year, month - 1, day);
@@ -122,9 +153,47 @@ const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
     }
   }
 
+  const openLastWateredPicker = () => {
+    const nextDate = parseDraftDate(plant.lastWateredAt);
+    setLastWateredPickerDate(nextDate);
+    if (Platform.OS === "ios") {
+      setIsIosLastWateredSheetVisible(true);
+      return;
+    }
+    setShowAndroidLastWateredPicker(true);
+  };
+
+  const handleLastWateredChange = (event: DateTimePickerEvent, selectedDate?: Date) => {
+    if (Platform.OS === "android") {
+      setShowAndroidLastWateredPicker(false);
+      if (event.type !== "set" || !selectedDate) {
+        return;
+      }
+      updateDraft("lastWateredAt", formatDateForInput(selectedDate));
+      return;
+    }
+
+    if (!selectedDate) return;
+    setLastWateredPickerDate(selectedDate);
+  };
+
+  const closeIosDateSheet = () => {
+    setIsIosLastWateredSheetVisible(false);
+  };
+
+  const confirmIosDateSheet = () => {
+    updateDraft("lastWateredAt", formatDateForInput(lastWateredPickerDate));
+    setIsIosLastWateredSheetVisible(false);
+  };
+
   const updateDraft = <K extends keyof PlantDraft>(key: K, value: PlantDraft[K]) => {
     setPlant((prev) => ({ ...prev, [key]: value }));
   };
+
+  useEffect(() => {
+    if (Platform.OS !== "ios") return;
+    setLastWateredPickerDate(parseDraftDate(plant.lastWateredAt));
+  }, [plant.lastWateredAt]);
 
   const petChipColors = (isToxic: boolean) => {
     return {
@@ -158,9 +227,11 @@ const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
       style={styles.container}
       behavior={Platform.OS === "ios" ? "padding" : undefined}
     >
-      <Header title="New plant" showBackButton={true} showLogo={false} hide={false} />
       <ScrollView
-        contentContainerStyle={styles.scrollContent}
+        contentContainerStyle={[
+          styles.scrollContent,
+          { paddingTop: insets.top + spacing.xs },
+        ]}
         keyboardShouldPersistTaps="handled"
         showsVerticalScrollIndicator={false}
       >
@@ -279,13 +350,20 @@ const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
             }
           />
 
-          <FormField
-            label="Last watered at"
-            placeholder="DD-MM-YYYY"
-            inputMode="numeric"
-            value={plant.lastWateredAt}
-            onChangeText={(text) => updateDraft("lastWateredAt", text)}
-          />
+          <View style={styles.dateFieldWrap}>
+            <Text style={styles.fieldLabel}>Last watered at</Text>
+            <Pressable
+              style={styles.dateFieldButton}
+              onPress={openLastWateredPicker}
+              accessibilityRole="button"
+              accessibilityLabel="Select last watered date"
+            >
+              <Text style={[styles.dateFieldText, !plant.lastWateredAt && styles.dateFieldPlaceholder]}>
+                {plant.lastWateredAt || "Select date"}
+              </Text>
+              <Ionicons name="calendar-outline" size={18} color={colors.textMuted} />
+            </Pressable>
+          </View>
 
           <FormField
             label="Notes"
@@ -303,6 +381,49 @@ const PlantFormScreen: React.FC<Props> = ({ route, navigation }) => {
           </View>
         </TouchableOpacity>
       </ScrollView>
+
+      {Platform.OS === "android" && showAndroidLastWateredPicker ? (
+        <DateTimePicker
+          value={lastWateredPickerDate}
+          mode="date"
+          display="default"
+          maximumDate={new Date()}
+          onChange={handleLastWateredChange}
+        />
+      ) : null}
+
+      {Platform.OS === "ios" ? (
+        <Modal
+          visible={isIosLastWateredSheetVisible}
+          transparent
+          animationType="slide"
+          presentationStyle="overFullScreen"
+          onRequestClose={closeIosDateSheet}
+        >
+          <Pressable style={styles.dateSheetBackdrop} onPress={closeIosDateSheet}>
+            <Pressable style={styles.dateSheetCard} onPress={() => {}}>
+              <View style={styles.dateSheetHeader}>
+                <TouchableOpacity onPress={closeIosDateSheet} activeOpacity={0.8}>
+                  <Text style={styles.dateSheetCancel}>Cancel</Text>
+                </TouchableOpacity>
+                <Text style={styles.dateSheetTitle}>Last watered date</Text>
+                <TouchableOpacity onPress={confirmIosDateSheet} activeOpacity={0.8}>
+                  <Text style={styles.dateSheetDone}>Done</Text>
+                </TouchableOpacity>
+              </View>
+              <DateTimePicker
+                style={styles.dateSheetPicker}
+                value={lastWateredPickerDate}
+                mode="date"
+                display="inline"
+                themeVariant="light"
+                maximumDate={new Date()}
+                onChange={handleLastWateredChange}
+              />
+            </Pressable>
+          </Pressable>
+        </Modal>
+      ) : null}
     </KeyboardAvoidingView>
   );
 };
@@ -316,7 +437,6 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.xs,
     paddingBottom: spacing.xl,
   },
   title: {
@@ -421,6 +541,67 @@ const styles = StyleSheet.create({
   },
   roomField: {
     marginBottom: spacing.md,
+  },
+  dateFieldWrap: {
+    marginBottom: spacing.md,
+  },
+  dateFieldButton: {
+    borderRadius: radius.sm,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.md,
+    backgroundColor: colors.surface,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+  },
+  dateFieldText: {
+    fontSize: 14,
+    fontWeight: "600",
+    color: colors.text,
+  },
+  dateFieldPlaceholder: {
+    color: "#64748b",
+  },
+  dateSheetBackdrop: {
+    flex: 1,
+    backgroundColor: `${colors.text}73`,
+    justifyContent: "flex-end",
+  },
+  dateSheetCard: {
+    backgroundColor: colors.surface,
+    borderTopLeftRadius: radius.lg,
+    borderTopRightRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingTop: spacing.sm,
+    paddingBottom: spacing.xs,
+  },
+  dateSheetHeader: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "space-between",
+    paddingHorizontal: spacing.lg,
+    marginBottom: spacing.xs,
+  },
+  dateSheetTitle: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.text,
+  },
+  dateSheetCancel: {
+    fontSize: 14,
+    fontWeight: "700",
+    color: colors.textMuted,
+  },
+  dateSheetDone: {
+    fontSize: 14,
+    fontWeight: "800",
+    color: colors.primary,
+  },
+  dateSheetPicker: {
+    alignSelf: "stretch",
   },
   notesInput: {
     minHeight: 90,

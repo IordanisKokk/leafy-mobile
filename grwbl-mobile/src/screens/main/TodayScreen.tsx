@@ -12,9 +12,8 @@ import {
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
-import Header from "../../components/Header";
 import { colors, spacing, radius, boxShadows, todayTheme } from "../../theme";
-import { Plant, fetchPlants } from "../../api/plants";
+import { Plant, fetchPlants, waterPlant } from "../../api/plants";
 import { useAuth } from "../../context/AuthContext";
 import { useSnackbar } from "../../context/SnackbarContext";
 import WateringCan from "../../../assets/watering-can/watering-can.svg";
@@ -22,6 +21,7 @@ import { useFocusEffect, useNavigation } from "@react-navigation/native";
 import { BottomTabNavigationProp } from "@react-navigation/bottom-tabs";
 import { MainTabParamList } from "../../navigation/MainTabNavigator";
 import QuickActionsDock, { QuickAction } from "./components/QuickActionsDock";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 
 const startOfDay = (date: Date) => {
   const next = new Date(date);
@@ -57,6 +57,7 @@ const computeNextWateringDate = (plant: Plant) => {
 };
 
 const TodayScreen: React.FC = () => {
+  const insets = useSafeAreaInsets();
   const navigation = useNavigation<BottomTabNavigationProp<MainTabParamList>>();
   const [plants, setPlants] = React.useState<Plant[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
@@ -64,6 +65,7 @@ const TodayScreen: React.FC = () => {
   const [isSnoozeModalVisible, setIsSnoozeModalVisible] = React.useState(false);
   const [snoozeError, setSnoozeError] = React.useState<string | null>(null);
   const [snoozedOffsets, setSnoozedOffsets] = React.useState<Record<string, number>>({});
+  const [wateringPlantIds, setWateringPlantIds] = React.useState<Record<string, boolean>>({});
 
   const auth = useAuth();
   const { showSnackbar } = useSnackbar();
@@ -169,24 +171,66 @@ const TodayScreen: React.FC = () => {
   const heroIconTint = todayTheme.hero.iconTint;
   const heroText = todayTheme.hero.text;
 
-  const handleMarkWatered = (plant: Plant) => {
-    console.log("Mark watered pressed for:", plant.id);
-    showSnackbar({
-      message: `Marked ${plant.name} as watered (placeholder)`,
-      type: "info",
-      duration: 2000,
-    });
+  const handleMarkWatered = async (plant: Plant) => {
+    if (!auth.token || wateringPlantIds[plant.id]) {
+      return;
+    }
+
+    setWateringPlantIds((current) => ({ ...current, [plant.id]: true }));
+
+    try {
+      const timestamp = new Date().toISOString();
+      const response = await waterPlant(plant.id, timestamp, auth.token);
+      const resolvedWateredAt = response.wateredAt ?? timestamp;
+
+      setPlants((current) =>
+        current.map((entry) =>
+          entry.id === response.plantId
+            ? { ...entry, lastWateredAt: resolvedWateredAt }
+            : entry
+        )
+      );
+      setSnoozedOffsets((current) => {
+        if (!(plant.id in current)) {
+          return current;
+        }
+
+        const next = { ...current };
+        delete next[plant.id];
+        return next;
+      });
+
+      showSnackbar({
+        message: `${plant.name} marked as watered.`,
+        type: "success",
+        duration: 2000,
+      });
+    } catch (err) {
+      console.error("waterPlant failed:", err);
+      showSnackbar({
+        message: `Could not mark ${plant.name} as watered.`,
+        type: "error",
+        duration: 2500,
+      });
+    } finally {
+      setWateringPlantIds((current) => {
+        const next = { ...current };
+        delete next[plant.id];
+        return next;
+      });
+    }
   };
 
   const handleOpenPlant = (plant: Plant) => {
     navigation.navigate("Plants", {
+      initial: false,
       screen: "PlantDetails",
       params: { plant },
     });
   };
 
   const handleAddPlant = () => {
-    navigation.navigate("Plants", { screen: "SelectSpecies" });
+    navigation.navigate("Plants", { initial: false, screen: "SelectSpecies" });
   };
 
   const handleOpenReminders = () => {
@@ -303,10 +347,7 @@ const TodayScreen: React.FC = () => {
 
   return (
     <View style={styles.container}>
-      <Header title="Today" showBackButton={false} showLogo={true} hide={false} />
-
-      <Text style={styles.subtitle}>Your plant tasks for today.</Text>
-
+      <View style={{ height: insets.top + spacing.sm }} />
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator />
@@ -396,6 +437,7 @@ const TodayScreen: React.FC = () => {
                     plant.species?.scientificName ||
                     "Unknown location";
                   const isLastRow = index === visibleTasks.length - 1 && remainingTasks === 0;
+                  const isWatering = Boolean(wateringPlantIds[plant.id]);
 
                   return (
                     <TouchableOpacity
@@ -428,23 +470,28 @@ const TodayScreen: React.FC = () => {
                         <Pressable
                           onPress={(event) => {
                             event.stopPropagation();
-                            handleMarkWatered(plant);
+                            void handleMarkWatered(plant);
                           }}
                           style={({ pressed }) => [
                             styles.taskQuickAction,
-                            pressed && styles.taskQuickActionActive,
+                            (pressed || isWatering) && styles.taskQuickActionActive,
                           ]}
                           accessibilityRole="button"
                           accessibilityLabel={`Mark ${plant.name} watered`}
+                          disabled={isWatering}
                           hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
                         >
-                          {({ pressed }) => (
-                            <Ionicons
-                              name="water-outline"
-                              size={16}
-                              color={pressed ? colors.background : colors.primary}
-                            />
-                          )}
+                          {({ pressed }) =>
+                            isWatering ? (
+                              <ActivityIndicator size="small" color={colors.background} />
+                            ) : (
+                              <Ionicons
+                                name="water-outline"
+                                size={16}
+                                color={pressed ? colors.background : colors.primary}
+                              />
+                            )
+                          }
                         </Pressable>
                       </View>
                     </TouchableOpacity>
@@ -584,12 +631,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingBottom: spacing.lg,
     flexGrow: 1,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.textMuted,
-    marginBottom: spacing.lg,
-    paddingHorizontal: spacing.md,
   },
   center: {
     flex: 1,
