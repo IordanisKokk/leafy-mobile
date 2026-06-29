@@ -23,6 +23,12 @@ import { MainTabParamList } from "../../navigation/MainTabNavigator";
 import QuickActionsDock, { QuickAction } from "./components/QuickActionsDock";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 
+type ScheduledPlant = {
+  plant: Plant;
+  nextDate: Date;
+  isOverdue: boolean;
+};
+
 const startOfDay = (date: Date) => {
   const next = new Date(date);
   next.setHours(0, 0, 0, 0);
@@ -45,8 +51,15 @@ const addDays = (date: Date, days: number) => {
   return next;
 };
 
+const getPlantIntervalDays = (plant: Plant) =>
+  plant.wateringIntervalDays ??
+  plant.wateringFrequencyDays ??
+  plant.species?.defaultWateringIntervalDays ??
+  plant.species?.defaultwateringFrequencyDays ??
+  null;
+
 const computeNextWateringDate = (plant: Plant) => {
-  const intervalDays = plant.wateringFrequencyDays ?? plant.wateringFrequencyDays;
+  const intervalDays = getPlantIntervalDays(plant);
   if (!intervalDays || intervalDays <= 0) return null;
   if (!plant.lastWateredAt) return null;
 
@@ -99,7 +112,7 @@ const TodayScreen: React.FC = () => {
 
   const today = startOfDay(new Date());
   const computeNextWateringDateForPlant = (plant: Plant): Date | null => {
-    const intervalDays = plant.wateringFrequencyDays ?? plant.wateringFrequencyDays;
+    const intervalDays = getPlantIntervalDays(plant);
     if (!intervalDays || intervalDays <= 0) return null;
 
     const baseNextDate = computeNextWateringDate(plant);
@@ -115,8 +128,28 @@ const TodayScreen: React.FC = () => {
 
     return null;
   };
+  const scheduledPlants = React.useMemo<ScheduledPlant[]>(
+    () =>
+      plants
+        .map((plant) => {
+          const nextDate = computeNextWateringDateForPlant(plant);
+          if (!nextDate) {
+            return null;
+          }
+
+          return {
+            plant,
+            nextDate,
+            isOverdue: nextDate < today,
+          };
+        })
+        .filter((entry): entry is ScheduledPlant => Boolean(entry))
+        .sort((left, right) => left.nextDate.getTime() - right.nextDate.getTime()),
+    [plants, snoozedOffsets, today],
+  );
+
   const dueTasks = plants.filter((plant) => {
-    const intervalDays = plant.wateringFrequencyDays ?? plant.wateringFrequencyDays;
+    const intervalDays = getPlantIntervalDays(plant);
     if (!intervalDays || intervalDays <= 0) return false;
     const nextDate = computeNextWateringDateForPlant(plant);
     if (!nextDate) return true;
@@ -126,39 +159,40 @@ const TodayScreen: React.FC = () => {
   const visibleTasks = dueTasks.slice(0, 3);
   const remainingTasks = Math.max(dueTasks.length - visibleTasks.length, 0);
 
-  const dueTodayCount = plants.filter((plant) => {
-    const nextDate = computeNextWateringDateForPlant(plant);
-    return nextDate ? isSameDay(nextDate, today) : false;
-  }).length;
+  const dueTodayCount = scheduledPlants.filter(({ nextDate }) => isSameDay(nextDate, today)).length;
 
-  const overdueCount = plants.filter((plant) => {
-    const nextDate = computeNextWateringDateForPlant(plant);
-    return nextDate ? nextDate < today : false;
-  }).length;
-
-  const wateredDates = new Set(
-    plants
-      .map((plant) => (plant.lastWateredAt ? new Date(plant.lastWateredAt) : null))
-      .filter((date): date is Date => Boolean(date))
-      .map((date) => dateKey(startOfDay(date)))
-  );
+  const overdueCount = scheduledPlants.filter(({ nextDate }) => nextDate < today).length;
 
   const weekStart = addDays(today, -((today.getDay() + 6) % 7));
   const weekDays = Array.from({ length: 7 }, (_, index) => addDays(weekStart, index));
-  const wateringStreakDays = (() => {
-    if (wateredDates.size === 0) return 0;
-    let streak = 0;
-    let cursor = today;
-    while (true) {
-      const key = dateKey(cursor);
-      if (!wateredDates.has(key)) {
-        break;
+  const weekEnd = addDays(weekStart, 6);
+
+  const duePlantsByWeekDay = React.useMemo(() => {
+    const grouped = new Map<string, ScheduledPlant[]>();
+
+    scheduledPlants.forEach((entry) => {
+      const normalizedDueDate = entry.isOverdue ? today : entry.nextDate;
+      if (normalizedDueDate < weekStart || normalizedDueDate > weekEnd) {
+        return;
       }
-      streak += 1;
-      cursor = addDays(cursor, -1);
-    }
-    return streak;
-  })();
+
+      const key = dateKey(normalizedDueDate);
+      const entries = grouped.get(key) ?? [];
+      entries.push(entry);
+      grouped.set(key, entries);
+    });
+
+    grouped.forEach((entries) => {
+      entries.sort((left, right) => {
+        if (left.isOverdue !== right.isOverdue) {
+          return left.isOverdue ? -1 : 1;
+        }
+        return left.plant.name.localeCompare(right.plant.name);
+      });
+    });
+
+    return grouped;
+  }, [scheduledPlants, today, weekStart, weekEnd]);
 
   const heroPalette = overdueCount > 0
     ? todayTheme.hero.overdue
@@ -518,23 +552,20 @@ const TodayScreen: React.FC = () => {
           <View style={styles.sectionCard}>
             <View style={styles.sectionHeaderRow}>
               <Text style={styles.sectionTitle}>This week</Text>
-              <View style={styles.streakBadge}>
-                <Ionicons name="flame" size={14} color={colors.primary} />
-                <Text style={styles.streakText}>{wateringStreakDays} day streak</Text>
-              </View>
             </View>
             <View style={styles.weekRow}>
               {weekDays.map((day) => {
                 const key = dateKey(day);
                 const isToday = isSameDay(day, today);
-                const hasWatering = wateredDates.has(key);
+                const entries = duePlantsByWeekDay.get(key) ?? [];
+                const hasWatering = entries.length > 0;
                 return (
                   <View
                     key={key}
                     style={[
                       styles.weekDay,
                       isToday && styles.weekDayToday,
-                      hasWatering && styles.weekDayWatered,
+                      hasWatering && styles.weekDayScheduled,
                     ]}
                   >
                     <Text
@@ -553,13 +584,18 @@ const TodayScreen: React.FC = () => {
                     >
                       {day.getDate()}
                     </Text>
-                    <View
-                      style={[
-                        styles.weekDot,
-                        hasWatering && styles.weekDotActive,
-                        isToday && styles.weekDotActiveToday,
-                      ]}
-                    />
+                    <View style={styles.weekDotsRow}>
+                      {Array.from({ length: Math.min(entries.length, 3) }, (_, index) => (
+                        <View
+                          key={`${key}-dot-${index}`}
+                          style={[
+                            styles.weekDot,
+                            hasWatering && styles.weekDotActive,
+                            isToday && styles.weekDotActiveToday,
+                          ]}
+                        />
+                      ))}
+                    </View>
                   </View>
                 );
               })}
@@ -781,26 +817,12 @@ const styles = StyleSheet.create({
     flexDirection: "row",
     alignItems: "center",
     justifyContent: "space-between",
-    marginBottom: spacing.sm,
+    marginBottom: spacing.xs,
   },
   sectionTitle: {
     fontSize: 16,
     fontWeight: "700",
     color: colors.text,
-  },
-  streakBadge: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 4,
-    borderRadius: radius.pill,
-    backgroundColor: todayTheme.streak.background,
-  },
-  streakText: {
-    fontSize: 12,
-    color: colors.primary,
-    fontWeight: "700",
   },
   taskSectionCard: {
     backgroundColor: colors.surface,
@@ -1004,48 +1026,59 @@ const styles = StyleSheet.create({
   weekRow: {
     flexDirection: "row",
     justifyContent: "space-between",
-    marginTop: spacing.sm,
+    marginTop: 0,
+    marginHorizontal: -2,
   },
   weekDay: {
     flex: 1,
+    minHeight: 74,
     paddingVertical: spacing.sm,
     borderRadius: radius.md,
-    backgroundColor: colors.surfaceSoft,
+    backgroundColor: "#f6f8f6",
     alignItems: "center",
     marginHorizontal: 2,
+    justifyContent: "center",
   },
   weekDayToday: {
-    backgroundColor: colors.primary,
-  },
-  weekDayWatered: {
     borderWidth: 1,
-    borderColor: colors.primary,
+    borderColor: "#cfe0d3",
+  },
+  weekDayScheduled: {
+    backgroundColor: "#eef7f0",
   },
   weekDayLabel: {
     fontSize: 11,
     color: colors.textMuted,
+    fontWeight: "600",
   },
   weekDayNumber: {
     marginTop: 2,
-    fontSize: 13,
-    fontWeight: "700",
+    fontSize: 14,
+    fontWeight: "800",
     color: colors.text,
   },
   weekDayLabelToday: {
-    color: colors.background,
+    color: colors.text,
+  },
+  weekDotsRow: {
+    minHeight: 10,
+    marginTop: spacing.xs,
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: 3,
   },
   weekDot: {
     width: 6,
     height: 6,
     borderRadius: 3,
-    marginTop: spacing.xs,
     backgroundColor: "transparent",
   },
   weekDotActive: {
     backgroundColor: colors.primary,
   },
   weekDotActiveToday: {
-    backgroundColor: colors.background,
+    backgroundColor: colors.primary,
   },
 });
 
