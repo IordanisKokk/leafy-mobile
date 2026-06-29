@@ -39,7 +39,7 @@ export const todayTheme = {
   hero: {
     neutral: {
       gradient: ["#64c39b", "#14b270"],
-      bubbles: ["#cbd5f5", "#e2e8f0", "#f1f5f9"],
+      bubbles: ["#0f9d56", "#1bb520", "#19ae64"],
       border: colors.border,
     },
     due: {

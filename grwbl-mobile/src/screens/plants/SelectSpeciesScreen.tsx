@@ -8,9 +8,9 @@ import {
   ActivityIndicator,
 } from "react-native";
 import { NativeStackScreenProps } from "@react-navigation/native-stack";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PlantsStackParamList } from "../../navigation/PlantsStackNavigator";
 import { boxShadows, colors, radius, spacing } from "../../theme";
-import Header from "../../components/Header";
 import { Species, fetchSpeciesList } from "../../api/species";
 import { Ionicons } from "@expo/vector-icons";
 import FormField from "../../components/FormField";
@@ -19,6 +19,7 @@ import FormField from "../../components/FormField";
 type Props = NativeStackScreenProps<PlantsStackParamList, "SelectSpecies">;
 
 const SelectSpeciesScreen: React.FC<Props> = ({ navigation }) => {
+  const insets = useSafeAreaInsets();
   const [species, setSpecies] = React.useState<Species[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
   const [searchInput, setSearchInput] = React.useState<string>("");
@@ -63,9 +64,7 @@ const SelectSpeciesScreen: React.FC<Props> = ({ navigation }) => {
 
   return (
     <View style={styles.container}>
-      <Header title="Select species" showBackButton={true} showLogo={false} hide={false} />
-
-      <View style={styles.content}>
+      <View style={[styles.content, { paddingTop: insets.top + spacing.md }]}>
         <Text style={styles.subtitle}>
           Pick a species to create a new plant entry.
         </Text>
@@ -140,7 +139,6 @@ const styles = StyleSheet.create({
   content: {
     flex: 1,
     paddingHorizontal: spacing.md,
-    paddingTop: spacing.lg,
   },
   searchField: {
     marginBottom: spacing.lg,

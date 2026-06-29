@@ -1,4 +1,3 @@
-// src/screens/plants/PlantsListScreen.tsx
 import React from "react";
 import {
   View,
@@ -9,6 +8,8 @@ import {
   FlatList,
   Alert,
   Pressable,
+  Image,
+  TextInput,
 } from "react-native";
 import { Ionicons } from "@expo/vector-icons";
 import { LinearGradient } from "expo-linear-gradient";
@@ -16,45 +17,452 @@ import { NativeStackScreenProps } from "@react-navigation/native-stack";
 import { useFocusEffect } from "@react-navigation/native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { PlantsStackParamList } from "../../navigation/PlantsStackNavigator";
-import { colors, spacing, radius, boxShadows } from "../../theme";
+import { colors, spacing, radius, boxShadows, todayTheme } from "../../theme";
 import { Plant, deletePlant, fetchPlants } from "../../api/plants";
-import Header from "../../components/Header";
 import { useAuth } from "../../context/AuthContext";
 import { useSnackbar } from "../../context/SnackbarContext";
-import FormField from "../../components/FormField";
 
 type Props = NativeStackScreenProps<PlantsStackParamList, "PlantsList">;
+type FilterKey = "all" | "overdue" | "dueSoon" | "ok";
+type PlantStatusTone = "setup" | "overdue" | "dueSoon" | "ok";
+
+type PlantWateringStatus = {
+  tone: PlantStatusTone;
+  badgeLabel: string;
+  nextWateringLabel: string;
+  diffDays: number | null;
+};
+
+type PlantCardVM = {
+  plant: Plant;
+  status: PlantWateringStatus;
+};
+type HeroTone = "calm" | "today" | "overdue";
+
+const heroPaletteByTone: Record<
+  HeroTone,
+  { gradient: readonly [string, string]; border: string; bubbles: readonly [string, string, string] }
+> = {
+  calm: {
+    gradient: todayTheme.hero.neutral.gradient,
+    border: todayTheme.hero.neutral.border,
+    bubbles: todayTheme.hero.neutral.bubbles,
+  },
+  today: {
+    gradient: todayTheme.hero.due.gradient,
+    border: todayTheme.hero.due.border,
+    bubbles: todayTheme.hero.due.bubbles,
+  },
+  overdue: {
+    gradient: todayTheme.hero.overdue.gradient,
+    border: todayTheme.hero.overdue.border,
+    bubbles: todayTheme.hero.overdue.bubbles,
+  },
+};
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+const DUE_SOON_WINDOW_DAYS = 3;
+const HERO_RADIUS = 22;
+
+const statusPalette: Record<PlantStatusTone, { bg: string; text: string }> = {
+  ok: { bg: "#dff4e7", text: "#15803d" },
+  dueSoon: { bg: "#fff1d6", text: "#c26700" },
+  overdue: { bg: "#fee2e2", text: "#b42318" },
+  setup: { bg: "#e8eef9", text: "#475569" },
+};
+
+const startOfDay = (date: Date): Date => {
+  const next = new Date(date);
+  next.setHours(0, 0, 0, 0);
+  return next;
+};
+
+const parseDate = (value?: string | null): Date | null => {
+  if (!value) return null;
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return null;
+  return date;
+};
+
+const getPlantDisplayName = (plant: Plant): string => {
+  const name = plant.name?.trim();
+  if (name) return name;
+  return plant.species?.commonName ?? plant.species?.scientificName ?? "Unnamed plant";
+};
+
+const getPlantImageUrl = (plant: Plant): string | null => {
+  const directUrl = (plant as Plant & { imageUrl?: string }).imageUrl;
+  return directUrl ?? plant.species?.imageUrl ?? null;
+};
+
+const getPlantRoomLabel = (plant: Plant): string => {
+  const room = plant.room?.trim();
+  const location = plant.location?.trim();
+
+  if (room && location) return `${room} - ${location}`;
+  if (room) return room;
+  if (location) return location;
+  return "No room set";
+};
+
+const getPlantFrequencyLabel = (plant: Plant): string => {
+  const intervalDays =
+    plant.wateringIntervalDays ??
+    plant.wateringFrequencyDays ??
+    plant.species?.defaultWateringIntervalDays ??
+    plant.species?.defaultwateringFrequencyDays;
+
+  if (!intervalDays || intervalDays <= 0) return "Set watering frequency";
+  return `Every ${intervalDays} days`;
+};
+
+const getPlantWateringStatus = (plant: Plant): PlantWateringStatus => {
+  const intervalDays =
+    plant.wateringIntervalDays ??
+    plant.wateringFrequencyDays ??
+    plant.species?.defaultWateringIntervalDays ??
+    plant.species?.defaultwateringFrequencyDays;
+
+  if (!intervalDays || intervalDays <= 0) {
+    return {
+      tone: "setup",
+      badgeLabel: "Setup needed",
+      nextWateringLabel: "Set watering frequency",
+      diffDays: null,
+    };
+  }
+
+  const lastWatered = parseDate(plant.lastWateredAt);
+  if (!lastWatered) {
+    return {
+      tone: "setup",
+      badgeLabel: "Setup needed",
+      nextWateringLabel: "Set last watered date",
+      diffDays: null,
+    };
+  }
+
+  const nextWatering = new Date(lastWatered);
+  nextWatering.setDate(nextWatering.getDate() + intervalDays);
+
+  const today = startOfDay(new Date());
+  const dueDate = startOfDay(nextWatering);
+  const diffDays = Math.round((dueDate.getTime() - today.getTime()) / DAY_MS);
+
+  if (diffDays < 0) {
+    const days = Math.abs(diffDays);
+    return {
+      tone: "overdue",
+      badgeLabel: "Overdue",
+      nextWateringLabel: `Overdue by ${days} day${days === 1 ? "" : "s"}`,
+      diffDays,
+    };
+  }
+
+  if (diffDays === 0) {
+    return {
+      tone: "dueSoon",
+      badgeLabel: "Due soon",
+      nextWateringLabel: "Due today",
+      diffDays,
+    };
+  }
+
+  if (diffDays <= DUE_SOON_WINDOW_DAYS) {
+    return {
+      tone: "dueSoon",
+      badgeLabel: "Due soon",
+      nextWateringLabel: `Next watering in ${diffDays} day${diffDays === 1 ? "" : "s"}`,
+      diffDays,
+    };
+  }
+
+  return {
+    tone: "ok",
+    badgeLabel: "OK",
+    nextWateringLabel: `Next watering in ${diffDays} day${diffDays === 1 ? "" : "s"}`,
+    diffDays,
+  };
+};
+
+const getNextWateringLabel = (plant: Plant): string => {
+  return getPlantWateringStatus(plant).nextWateringLabel;
+};
+
+const matchesSearch = (plant: Plant, query: string): boolean => {
+  if (!query) return true;
+  const text = query.trim().toLowerCase();
+  if (!text) return true;
+
+  const haystack = [
+    plant.name,
+    plant.species?.commonName,
+    plant.species?.scientificName,
+    plant.room,
+    plant.location,
+  ]
+    .filter((value): value is string => Boolean(value?.trim()))
+    .join(" ")
+    .toLowerCase();
+
+  return haystack.includes(text);
+};
+
+const toneMatchesFilter = (tone: PlantStatusTone, filter: FilterKey): boolean => {
+  if (filter === "all") return true;
+  if (filter === "overdue") return tone === "overdue" || tone === "setup";
+  if (filter === "dueSoon") return tone === "dueSoon";
+  return tone === "ok";
+};
+
+const getOverviewMessage = (overdueCount: number, dueSoonCount: number): string => {
+  if (overdueCount > 0) return "Some plants need attention.";
+  if (dueSoonCount > 0) return "A few plants need care soon.";
+  return "Here's how they're doing.";
+};
+
+const StatusBadge: React.FC<{ tone: PlantStatusTone; label: string }> = ({ tone, label }) => {
+  const palette = statusPalette[tone];
+  return (
+    <View style={[styles.statusBadge, { backgroundColor: palette.bg }]}>
+      <Text style={[styles.statusBadgeText, { color: palette.text }]}>{label}</Text>
+    </View>
+  );
+};
+
+const OverviewHeroCard: React.FC<{
+  totalPlants: number;
+  overdue: number;
+  dueSoon: number;
+  ok: number;
+  empty: boolean;
+  tone: HeroTone;
+  onAddPlant: () => void;
+}> = ({ totalPlants, overdue, dueSoon, ok, empty, tone, onAddPlant }) => {
+  const palette = heroPaletteByTone[tone];
+  const heroText = todayTheme.hero.text;
+
+  if (empty) {
+    return (
+      <View style={[styles.overviewHeroShell, { borderColor: heroPaletteByTone.calm.border }]}>
+        <LinearGradient
+          colors={heroPaletteByTone.calm.gradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.overviewHero}
+        >
+          <View style={[styles.heroBlobLarge, { backgroundColor: heroPaletteByTone.calm.bubbles[0] }]} />
+          <View style={[styles.heroBlobSmall, { backgroundColor: heroPaletteByTone.calm.bubbles[1] }]} />
+          <View style={styles.emptyHeroContent}>
+            <Text style={styles.emptyHeroTitle}>Start your plant collection</Text>
+            <Text style={styles.emptyHeroText}>
+              Add your first plant to begin tracking watering and care.
+            </Text>
+            <TouchableOpacity style={styles.emptyHeroButton} onPress={onAddPlant} activeOpacity={0.86}>
+              <Ionicons name="add-circle" size={18} color={colors.background} />
+              <Text style={styles.emptyHeroButtonText}>Add your first plant</Text>
+            </TouchableOpacity>
+          </View>
+          <View style={styles.emptyHeroArt}>
+            <Ionicons name="leaf" size={56} color="rgba(14,149,63,0.36)" />
+          </View>
+        </LinearGradient>
+      </View>
+    );
+  }
+
+  return (
+    <View style={[styles.overviewHeroShell, { borderColor: palette.border }]}>
+      <LinearGradient
+        colors={palette.gradient}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.overviewHero}
+      >
+        <View style={[styles.heroBlobLarge, { backgroundColor: palette.bubbles[0] }]} />
+        <View style={[styles.heroBlobSmall, { backgroundColor: palette.bubbles[1] }]} />
+
+        <Text style={[styles.overviewLabel, { color: heroText.secondary }]}>Overview</Text>
+        <Text style={[styles.overviewPlantsCount, { color: heroText.primary }]}>{totalPlants} plants</Text>
+        <Text style={[styles.overviewSupport, { color: heroText.secondary }]}>
+          {getOverviewMessage(overdue, dueSoon)}
+        </Text>
+
+        <View style={styles.overviewStatsStrip}>
+          <View style={styles.overviewStatItem}>
+            <View style={[styles.overviewStatDot, { backgroundColor: "#ef4444" }]} />
+            <Text style={[styles.overviewStatValue, { color: heroText.primary }]}>{overdue}</Text>
+            <Text style={[styles.overviewStatLabel, { color: heroText.muted }]}>Overdue</Text>
+          </View>
+          <View style={styles.overviewDivider} />
+          <View style={styles.overviewStatItem}>
+            <View style={[styles.overviewStatDot, { backgroundColor: "#f59e0b" }]} />
+            <Text style={[styles.overviewStatValue, { color: heroText.primary }]}>{dueSoon}</Text>
+            <Text style={[styles.overviewStatLabel, { color: heroText.muted }]}>Due soon</Text>
+          </View>
+          <View style={styles.overviewDivider} />
+          <View style={styles.overviewStatItem}>
+            <View style={[styles.overviewStatDot, { backgroundColor: "#22c55e" }]} />
+            <Text style={[styles.overviewStatValue, { color: heroText.primary }]}>{ok}</Text>
+            <Text style={[styles.overviewStatLabel, { color: heroText.muted }]}>OK</Text>
+          </View>
+        </View>
+      </LinearGradient>
+    </View>
+  );
+};
+
+const PlantFilterPills: React.FC<{
+  selected: FilterKey;
+  onSelect: (value: FilterKey) => void;
+  counts: { all: number; overdue: number; dueSoon: number; ok: number };
+}> = ({ selected, onSelect, counts }) => {
+  const pills: Array<{ key: FilterKey; label: string }> = [
+    { key: "all", label: `All (${counts.all})` },
+    { key: "overdue", label: `Overdue (${counts.overdue})` },
+    { key: "dueSoon", label: `Due soon (${counts.dueSoon})` },
+    { key: "ok", label: `OK (${counts.ok})` },
+  ];
+
+  return (
+    <View style={styles.filtersWrap}>
+      {pills.map((pill) => {
+        const active = selected === pill.key;
+        return (
+          <Pressable
+            key={pill.key}
+            onPress={() => onSelect(pill.key)}
+            style={({ pressed }) => [
+              styles.filterPill,
+              active && styles.filterPillActive,
+              pressed && styles.filterPillPressed,
+            ]}
+            accessibilityRole="button"
+            accessibilityState={{ selected: active }}
+          >
+            <Text style={[styles.filterPillText, active && styles.filterPillTextActive]}>{pill.label}</Text>
+          </Pressable>
+        );
+      })}
+    </View>
+  );
+};
+
+const PlantListCard: React.FC<{
+  item: Plant;
+  onOpen: (plant: Plant) => void;
+  onDelete: (plant: Plant) => void;
+}> = ({ item, onOpen, onDelete }) => {
+  const displayName = getPlantDisplayName(item);
+  const imageUrl = getPlantImageUrl(item);
+  const roomLabel = getPlantRoomLabel(item);
+  const speciesName = item.species?.commonName ?? item.species?.scientificName ?? "Unknown species";
+  const status = getPlantWateringStatus(item);
+  const frequencyLabel = getPlantFrequencyLabel(item);
+  const palette = statusPalette[status.tone];
+
+  return (
+    <Pressable
+      onPress={() => onOpen(item)}
+      onLongPress={() => onDelete(item)}
+      delayLongPress={400}
+      style={({ pressed }) => [styles.plantCard, pressed && styles.plantCardPressed]}
+      accessibilityRole="button"
+      accessibilityLabel={`Open ${displayName}`}
+    >
+      <View style={styles.cardHeaderRow}>
+        <View style={styles.cardMainInfoWrap}>
+          <View style={styles.thumbnailWrap}>
+            {imageUrl ? (
+              <Image source={{ uri: imageUrl }} style={styles.thumbnailImage} />
+            ) : (
+              <View style={styles.thumbnailFallback}>
+                <Ionicons name="leaf-outline" size={24} color={colors.primary} />
+              </View>
+            )}
+          </View>
+
+          <View style={styles.cardTextWrap}>
+            <Text style={styles.cardPlantName} numberOfLines={2}>
+              {displayName}
+            </Text>
+            <Text style={styles.cardSpeciesRoom} numberOfLines={1}>
+              {speciesName} - {roomLabel}
+            </Text>
+
+            <View style={styles.cardMetaRow}>
+              <Ionicons name="calendar-outline" size={16} color={palette.text} />
+              <Text style={[styles.cardMetaText, { color: palette.text }]} numberOfLines={1}>
+                {getNextWateringLabel(item)}
+              </Text>
+            </View>
+
+            <View style={styles.cardMetaRow}>
+              <Ionicons name="refresh-outline" size={16} color={colors.textMuted} />
+              <Text style={styles.cardMetaText} numberOfLines={1}>
+                {frequencyLabel}
+              </Text>
+            </View>
+          </View>
+        </View>
+
+        <View style={styles.cardRightCol}>
+          <StatusBadge tone={status.tone} label={status.badgeLabel} />
+          <Ionicons name="chevron-forward" size={20} color={colors.textMuted} style={styles.cardChevron} />
+        </View>
+      </View>
+    </Pressable>
+  );
+};
+
+const EmptyPlantsState: React.FC<{ onAddPlant: () => void }> = ({ onAddPlant }) => {
+  return (
+    <View style={styles.emptyStateCard}>
+      <View style={styles.emptyStateIllustration}>
+        <View style={styles.shelfLine} />
+        <Ionicons name="leaf" size={48} color="rgba(14,149,63,0.38)" />
+      </View>
+
+      <Text style={styles.emptyStateTitle}>No plants yet</Text>
+      <Text style={styles.emptyStateBody}>
+        Start your little indoor jungle. We'll help you remember watering, rooms, and care notes.
+      </Text>
+
+      <TouchableOpacity style={styles.emptyStateButton} onPress={onAddPlant} activeOpacity={0.86}>
+        <Ionicons name="add-circle" size={18} color={colors.background} />
+        <Text style={styles.emptyStateButtonText}>Add your first plant</Text>
+      </TouchableOpacity>
+    </View>
+  );
+};
+
+const EmptySearchResultsState: React.FC = () => {
+  return (
+    <View style={styles.emptyResultsWrap}>
+      <Text style={styles.emptyResultsTitle}>No matching plants</Text>
+      <Text style={styles.emptyResultsBody}>Try a different search or filter.</Text>
+    </View>
+  );
+};
 
 const PlantsListScreen: React.FC<Props> = ({ navigation }) => {
   const [plants, setPlants] = React.useState<Plant[]>([]);
   const [loading, setLoading] = React.useState<boolean>(false);
+  const [refreshing, setRefreshing] = React.useState<boolean>(false);
   const [error, setError] = React.useState<string | null>(null);
   const [searchInput, setSearchInput] = React.useState<string>("");
-  const [selectedFilter, setSelectedFilter] = React.useState<
-    "all" | "overdue" | "dueSoon" | "ok"
-  >("all");
+  const [selectedFilter, setSelectedFilter] = React.useState<FilterKey>("all");
+  const hasLoadedOnceRef = React.useRef(false);
   const insets = useSafeAreaInsets();
 
   const auth = useAuth();
   const { showSnackbar } = useSnackbar();
 
-  const handleAddPlant = () => {
+  const handleAddPlant = React.useCallback(() => {
     navigation.navigate("SelectSpecies");
-  };
+  }, [navigation]);
 
-  const handleWaterPlant = (plant: Plant) => {
-    showSnackbar({
-      message: `Watered ${plant.name}`,
-      type: "success",
-      duration: 6000,
-      actionLabel: "Undo",
-      onAction: () => {
-        showSnackbar({ message: "Watering undone", type: "info", duration: 2000 });
-      },
-    });
-  };
-
-  const handleDeletePlant = (plant: Plant) => {
+  const handleDeletePlant = React.useCallback((plant: Plant) => {
     Alert.alert(
       "Delete plant?",
       "This will permanently remove this plant.",
@@ -78,7 +486,11 @@ const PlantsListScreen: React.FC<Props> = ({ navigation }) => {
 
               if (msg.includes("401") || msg.includes("403")) {
                 auth.logout?.();
-                showSnackbar({ message: "Your session has expired. Please log in again.", type: "error", duration: 2000 });
+                showSnackbar({
+                  message: "Your session has expired. Please log in again.",
+                  type: "error",
+                  duration: 2000,
+                });
                 return;
               }
 
@@ -88,70 +500,37 @@ const PlantsListScreen: React.FC<Props> = ({ navigation }) => {
         },
       ],
     );
-  };
+  }, [auth, showSnackbar]);
 
-  const handleOpenPlant = (plant: Plant) => {
+  const handleOpenPlant = React.useCallback((plant: Plant) => {
     navigation.navigate("PlantDetails", { plant });
-  };
+  }, [navigation]);
 
-  const getPlantStatus = (plant: Plant) => {
-    const intervalDays = plant.wateringIntervalDays ?? plant.wateringFrequencyDays;
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  const loadPlants = React.useCallback(async (options?: { refresh?: boolean; silent?: boolean }) => {
+    const isRefresh = Boolean(options?.refresh);
+    const isSilent = Boolean(options?.silent);
 
-    if (!intervalDays || intervalDays <= 0) {
-      return { label: "No schedule", tone: "ok", diffDays: null } as const;
-    }
-
-    if (!plant.lastWateredAt) {
-      return { label: "Needs last watered", tone: "overdue", diffDays: null } as const;
-    }
-
-    const last = new Date(plant.lastWateredAt);
-    if (Number.isNaN(last.getTime())) {
-      return { label: "Needs last watered", tone: "overdue", diffDays: null } as const;
-    }
-
-    const next = new Date(last);
-    next.setDate(next.getDate() + intervalDays);
-    next.setHours(0, 0, 0, 0);
-
-    const diffDays = Math.round(
-      (next.getTime() - today.getTime()) / (1000 * 60 * 60 * 24),
-    );
-
-    if (!Number.isFinite(diffDays) || Math.abs(diffDays) > 3650) {
-      return { label: "Schedule not set", tone: "ok", diffDays: null } as const;
-    }
-
-    if (diffDays < 0) {
-      return { label: `Overdue by ${Math.abs(diffDays)}d`, tone: "overdue", diffDays } as const;
-    }
-    if (diffDays === 0) {
-      return { label: "Due today", tone: "dueToday", diffDays } as const;
-    }
-    if (diffDays <= 3) {
-      return { label: `Due in ${diffDays}d`, tone: "dueSoon", diffDays } as const;
-    }
-
-    return { label: `Due in ${diffDays}d`, tone: "ok", diffDays } as const;
-  };
-
-  const loadPlants = React.useCallback(async () => {
     if (!auth.token) {
       setError("You are not signed in. Please log in again.");
       setPlants([]);
       return;
     }
 
-    setLoading(true);
-    setError(null);
+    if (isRefresh) {
+      setRefreshing(true);
+    } else if (!isSilent) {
+      setLoading(true);
+    }
+
+    if (!isSilent) {
+      setError(null);
+    }
+
     try {
       const data = await fetchPlants(auth.token);
       setPlants(Array.isArray(data) ? data : []);
     } catch (err) {
       console.error("fetchPlants failed:", err);
-
       const msg = err instanceof Error ? err.message : String(err);
 
       if (msg.includes("401") || msg.includes("403")) {
@@ -161,299 +540,175 @@ const PlantsListScreen: React.FC<Props> = ({ navigation }) => {
         return;
       }
 
-      setError("Could not load plants. Please try again.");
-      setPlants([]);
+      if (!isSilent) {
+        setError("Could not load plants. Please try again.");
+        setPlants([]);
+      }
     } finally {
-      setLoading(false);
+      if (isRefresh) {
+        setRefreshing(false);
+      } else if (!isSilent) {
+        setLoading(false);
+      }
     }
   }, [auth]);
 
   useFocusEffect(
     React.useCallback(() => {
-      void loadPlants();
+      if (!hasLoadedOnceRef.current) {
+        hasLoadedOnceRef.current = true;
+        void loadPlants();
+        return;
+      }
+
+      void loadPlants({ silent: true });
     }, [loadPlants]),
   );
 
-  const filteredPlants = React.useMemo(() => {
-    const q = searchInput.trim().toLowerCase();
-
-    return plants.filter((plant) => {
-      const status = getPlantStatus(plant);
-      const matchesFilter = (() => {
-        if (selectedFilter === "overdue") return status.tone === "overdue";
-        if (selectedFilter === "dueSoon") return status.tone === "dueToday" || status.tone === "dueSoon";
-        if (selectedFilter === "ok") return status.tone === "ok";
-        return true;
-      })();
-
-      if (!matchesFilter) return false;
-      if (!q) return true;
-
-      const plantName = (plant.name ?? "").toLowerCase();
-      const speciesCommon = (plant.species?.commonName ?? "").toLowerCase();
-      const speciesSci = (plant.species?.scientificName ?? "").toLowerCase();
-      const speciesId = (plant.species?.id ?? plant.speciesId ?? "").toLowerCase();
-      const room = (plant.room ?? "").toLowerCase();
-      const location = (plant.location ?? "").toLowerCase();
-
-      return (
-        plantName.includes(q) ||
-        speciesCommon.includes(q) ||
-        speciesSci.includes(q) ||
-        speciesId.includes(q) ||
-        room.includes(q) ||
-        location.includes(q)
-      );
-    });
-  }, [plants, searchInput, selectedFilter]);
-
-  const overviewCounts = React.useMemo(() => {
-    return plants.reduce(
-      (acc, plant) => {
-        const status = getPlantStatus(plant);
-        if (status.tone === "overdue") acc.overdue += 1;
-        if (status.tone === "dueToday" || status.tone === "dueSoon") acc.dueSoon += 1;
-        acc.total += 1;
-        return acc;
-      },
-      { overdue: 0, dueSoon: 0, ok: 0, total: 0 },
-    );
+  const plantViewModels = React.useMemo<PlantCardVM[]>(() => {
+    return plants.map((plant) => ({ plant, status: getPlantWateringStatus(plant) }));
   }, [plants]);
 
   const filterCounts = React.useMemo(() => {
-    return plants.reduce(
-      (acc, plant) => {
-        const status = getPlantStatus(plant);
+    return plantViewModels.reduce(
+      (acc, item) => {
         acc.all += 1;
-        if (status.tone === "overdue") acc.overdue += 1;
-        if (status.tone === "dueToday" || status.tone === "dueSoon") acc.dueSoon += 1;
-        if (status.tone === "ok") acc.ok += 1;
+        if (item.status.tone === "overdue" || item.status.tone === "setup") {
+          acc.overdue += 1;
+        }
+        if (item.status.tone === "dueSoon") {
+          acc.dueSoon += 1;
+        }
+        if (item.status.tone === "ok") {
+          acc.ok += 1;
+        }
         return acc;
       },
       { all: 0, overdue: 0, dueSoon: 0, ok: 0 },
     );
-  }, [plants]);
+  }, [plantViewModels]);
 
-  const renderPlantItem = ({ item, index }: { item: Plant; index: number }) => {
-    const status = getPlantStatus(item);
-    const locationLabel = [item.room, item.location].filter(Boolean).join(" · ");
-    const secondaryLabel =
-      locationLabel ||
-      item.species?.commonName ||
-      item.species?.scientificName ||
-      "Unknown location";
-    const intervalDays = item.wateringIntervalDays ?? item.wateringFrequencyDays;
-    const scheduleLabel = intervalDays && intervalDays > 0
-      ? `Every ${intervalDays} days`
-      : "Schedule not set";
-    const statusColor = (() => {
-      if (status.tone === "overdue") return colors.error;
-      if (status.tone === "dueToday") return colors.primary;
-      if (status.tone === "dueSoon") return "#f59e0b";
-      return colors.textMuted;
-    })();
-    const isLast = index === filteredPlants.length - 1;
+  const filteredPlants = React.useMemo(() => {
+    return plantViewModels
+      .filter((item) => toneMatchesFilter(item.status.tone, selectedFilter))
+      .filter((item) => matchesSearch(item.plant, searchInput))
+      .map((item) => item.plant);
+  }, [plantViewModels, searchInput, selectedFilter]);
 
+  const hasPlants = plants.length > 0;
+  const hasFilterResults = filteredPlants.length > 0;
+  const hasOverdueWatering = React.useMemo(
+    () => plantViewModels.some((item) => item.status.tone === "overdue"),
+    [plantViewModels],
+  );
+  const hasDueTodayWatering = React.useMemo(
+    () =>
+      plantViewModels.some(
+        (item) => item.status.tone === "dueSoon" && item.status.diffDays === 0,
+      ),
+    [plantViewModels],
+  );
+  const heroTone: HeroTone = hasOverdueWatering
+    ? "overdue"
+    : hasDueTodayWatering
+      ? "today"
+      : "calm";
+
+  const renderHeader = React.useMemo(() => {
     return (
-      <Pressable
-        onPress={() => handleOpenPlant(item)}
-        onLongPress={() => handleDeletePlant(item)}
-        delayLongPress={400}
-        accessibilityRole="button"
-        accessibilityLabel={`${item.name} details`}
-        style={({ pressed }) => [
-          styles.listRow,
-          { borderLeftColor: statusColor },
-          pressed && styles.listRowPressed,
-          isLast && styles.listRowLast,
-        ]}
-      >
-        <View style={styles.listLeft}>
-          <View style={styles.listThumb} />
-          <View style={styles.listInfo}>
-            <Text style={styles.listName} numberOfLines={2}>
-              {item.name}
-            </Text>
-            <Text style={styles.listLocation} numberOfLines={1}>
-              {secondaryLabel}
-            </Text>
-            <Text style={styles.listMicro} numberOfLines={1}>
-              {scheduleLabel}
-            </Text>
-            <View style={styles.listStatusRow}>
-              <View style={[styles.listStatusDot, { backgroundColor: statusColor }]} />
-              <Text style={[styles.listStatusText, { color: statusColor }]}>
-                {status.label}
-              </Text>
-            </View>
-          </View>
-        </View>
-        <Pressable
-          onPress={(event) => {
-            event.stopPropagation();
-            handleWaterPlant(item);
-          }}
-          style={({ pressed }) => [
-            styles.quickAction,
-            pressed && styles.quickActionPressed,
-          ]}
-          accessibilityRole="button"
-          accessibilityLabel={`Mark ${item.name} watered`}
-          hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-        >
-          {({ pressed }) => (
-            <Ionicons
-              name="water-outline"
-              size={16}
-              color={pressed ? colors.background : colors.primary}
-            />
-          )}
-        </Pressable>
-      </Pressable>
-    );
-  };
+      <View>
+        <OverviewHeroCard
+          totalPlants={filterCounts.all}
+          overdue={filterCounts.overdue}
+          dueSoon={filterCounts.dueSoon}
+          ok={filterCounts.ok}
+          empty={!hasPlants}
+          tone={heroTone}
+          onAddPlant={handleAddPlant}
+        />
 
-  const emptyStateTitle = plants.length === 0 ? "No plants yet" : "No matches";
-  const emptyStateMessage =
-    plants.length === 0
-      ? "Add your first plant to start tracking its care."
-      : "Try a different search term.";
+        <View style={styles.searchWrap}>
+          <Ionicons name="search-outline" size={18} color={colors.textMuted} />
+          <TextInput
+            value={searchInput}
+            onChangeText={setSearchInput}
+            placeholder="Search plants..."
+            placeholderTextColor="#64748b"
+            autoCapitalize="none"
+            autoCorrect={false}
+            style={styles.searchInput}
+            editable={hasPlants}
+          />
+        </View>
+
+        {!hasPlants ? (
+          <View style={styles.searchHelperCard}>
+            <Text style={styles.searchHelperText}>Add a plant to start searching.</Text>
+          </View>
+        ) : null}
+
+        {hasPlants ? (
+          <PlantFilterPills selected={selectedFilter} onSelect={setSelectedFilter} counts={filterCounts} />
+        ) : null}
+      </View>
+    );
+  }, [filterCounts, hasPlants, handleAddPlant, heroTone, searchInput, selectedFilter]);
 
   return (
     <View style={styles.container}>
-      <Header title="My plants" showBackButton={false} showLogo={true} hide={false} />
+      <View style={{ height: insets.top + spacing.sm }} />
 
-      <Text style={styles.subtitle}>
-        Track watering, locations and health for all your green buddies.
-      </Text>
-
-      {/* Loading */}
       {loading ? (
         <View style={styles.center}>
           <ActivityIndicator />
-          <Text style={styles.centerText}>Loading plants…</Text>
+          <Text style={styles.centerText}>Loading plants...</Text>
         </View>
       ) : error ? (
-        /* Error */
         <View style={styles.messageCard}>
           <Text style={styles.cardTitle}>Something went wrong</Text>
           <Text style={styles.cardText}>{error}</Text>
 
-          <TouchableOpacity style={styles.primaryButton} onPress={loadPlants}>
+          <TouchableOpacity style={styles.primaryButton} onPress={() => void loadPlants()}>
             <Text style={styles.primaryButtonText}>Try again</Text>
           </TouchableOpacity>
         </View>
       ) : (
-        <View style={{ flex: 1 }}>
-          <LinearGradient
-            colors={[colors.primarySoft, colors.primary]}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.overviewCard}
-          >
-            <View style={styles.overviewContent}>
-              <Text style={styles.overviewTitle}>Overview</Text>
-              <View style={styles.overviewMetricsInline}>
-                <View style={styles.overviewMetric}>
-                  <View style={[styles.overviewDot, styles.overviewDotOverdue]} />
-                  <Text style={styles.overviewLabel}>Overdue</Text>
-                  <Text style={styles.overviewValue}>{overviewCounts.overdue}</Text>
-                </View>
-                <View style={styles.overviewMetric}>
-                  <View style={[styles.overviewDot, styles.overviewDotDueSoon]} />
-                  <Text style={styles.overviewLabel}>Due soon</Text>
-                  <Text style={styles.overviewValue}>{overviewCounts.dueSoon}</Text>
-                </View>
-                <View style={styles.overviewMetric}>
-                  <View style={[styles.overviewDot, styles.overviewDotTotal]} />
-                  <Text style={styles.overviewLabel}>Total</Text>
-                  <Text style={styles.overviewValue}>{overviewCounts.total}</Text>
-                </View>
-              </View>
-            </View>
-            <View style={styles.overviewArt}>
-              <View style={styles.overviewBubbleLarge} />
-              <View style={styles.overviewBubbleSmall} />
-            </View>
-          </LinearGradient>
-
-          <FormField
-            value={searchInput}
-            onChangeText={setSearchInput}
-            placeholder="Search plants…"
-            autoCapitalize="none"
-            autoCorrect={false}
-            containerStyle={styles.searchField}
-          />
-
-          <View style={styles.segmentedControl}>
-            {(
-              [
-                { key: "all", label: `All (${filterCounts.all})` },
-                { key: "overdue", label: `Overdue (${filterCounts.overdue})` },
-                { key: "dueSoon", label: `Due soon (${filterCounts.dueSoon})` },
-                { key: "ok", label: `OK (${filterCounts.ok})` },
-              ] as const
-            ).map((segment) => {
-              const isActive = selectedFilter === segment.key;
-              return (
-                <Pressable
-                  key={segment.key}
-                  onPress={() => setSelectedFilter(segment.key)}
-                  accessibilityRole="button"
-                  accessibilityState={{ selected: isActive }}
-                  accessibilityLabel={`${segment.label} filter`}
-                  style={({ pressed }) => [
-                    styles.segmentedItem,
-                    isActive && styles.segmentedItemActive,
-                    pressed && styles.segmentedItemPressed,
-                  ]}
-                >
-                  <Text
-                    style={[
-                      styles.segmentedLabel,
-                      isActive && styles.segmentedLabelActive,
-                    ]}
-                  >
-                    {segment.label}
-                  </Text>
-                </Pressable>
-              );
-            })}
-          </View>
-
-          <View style={styles.listCard}>
-            <FlatList
-              data={filteredPlants}
-              keyExtractor={(item, index) => item.id ?? `plant-${index}`}
-              renderItem={renderPlantItem}
-              contentContainerStyle={[
-                styles.listContent,
-                filteredPlants.length === 0 && styles.listContentEmpty,
-                { paddingBottom: insets.bottom + spacing.xxxl + 80 },
-              ]}
-              ListEmptyComponent={
-                <View style={styles.emptyState}>
-                  <Text style={styles.emptyTitle}>{emptyStateTitle}</Text>
-                  <Text style={styles.emptyText}>{emptyStateMessage}</Text>
-                </View>
-              }
-              showsVerticalScrollIndicator={false}
-            />
-          </View>
-        </View>
+        <FlatList
+          data={hasPlants ? filteredPlants : []}
+          keyExtractor={(item, index) => item.id ?? `plant-${index}`}
+          renderItem={({ item }) => (
+            <PlantListCard item={item} onOpen={handleOpenPlant} onDelete={handleDeletePlant} />
+          )}
+          refreshing={refreshing}
+          onRefresh={() => void loadPlants({ refresh: true })}
+          ListHeaderComponent={renderHeader}
+          ListEmptyComponent={
+            hasPlants ? (
+              <EmptySearchResultsState />
+            ) : (
+              <EmptyPlantsState onAddPlant={handleAddPlant} />
+            )
+          }
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.listContentContainer,
+            (!hasPlants || !hasFilterResults) && styles.listContentGrow,
+            { paddingBottom: insets.bottom + 120 },
+          ]}
+        />
       )}
 
-      {!loading && (
+      {!loading && !error ? (
         <TouchableOpacity
-          style={styles.fab}
+          style={[styles.fab, { bottom: insets.bottom + 72 }]}
           onPress={handleAddPlant}
           accessibilityRole="button"
           accessibilityLabel="Add plant"
+          activeOpacity={0.9}
         >
-          <Text style={styles.fabIcon}>+</Text>
+          <Ionicons name="add" size={30} color={colors.background} />
         </TouchableOpacity>
-      )}
+      ) : null}
     </View>
   );
 };
@@ -464,11 +719,6 @@ const styles = StyleSheet.create({
     paddingHorizontal: spacing.md,
     paddingTop: spacing.xs,
     backgroundColor: colors.background,
-  },
-  subtitle: {
-    fontSize: 14,
-    color: colors.textMuted,
-    marginBottom: spacing.lg,
   },
 
   center: {
@@ -485,13 +735,13 @@ const styles = StyleSheet.create({
   messageCard: {
     backgroundColor: colors.surface,
     borderRadius: radius.lg,
-    padding: spacing.md,
+    padding: spacing.lg,
     boxShadow: boxShadows.sm,
   },
   cardTitle: {
     fontSize: 18,
-    fontWeight: "600",
-    marginBottom: spacing.sm,
+    fontWeight: "700",
+    marginBottom: spacing.xs,
     color: colors.text,
   },
   cardText: {
@@ -508,257 +758,376 @@ const styles = StyleSheet.create({
   },
   primaryButtonText: {
     fontSize: 14,
-    fontWeight: "600",
+    fontWeight: "700",
     color: colors.background,
   },
 
-  searchField: {
-    marginBottom: spacing.md,
+  listContentContainer: {
+    paddingBottom: spacing.xl,
   },
-  overviewCard: {
-    borderRadius: radius.lg,
-    padding: spacing.md,
-    borderWidth: 1,
-    borderColor: "rgba(14,149,63,0.2)",
-    boxShadow: boxShadows.sm,
-    marginBottom: spacing.md,
-    overflow: "hidden",
-  },
-  overviewContent: {
-    zIndex: 1,
-  },
-  overviewTitle: {
-    fontSize: 16,
-    fontWeight: "800",
-    color: colors.surface,
-    marginBottom: spacing.sm,
-  },
-  overviewMetricsInline: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.md,
-    flexWrap: "wrap",
-  },
-  overviewMetric: {
-    flexDirection: "row",
-    alignItems: "center",
-    gap: spacing.xs,
-  },
-  overviewDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  overviewDotOverdue: {
-    backgroundColor: colors.error,
-  },
-  overviewDotDueSoon: {
-    backgroundColor: "#f59e0b",
-  },
-  overviewDotTotal: {
-    backgroundColor: colors.textMuted,
-  },
-  overviewLabel: {
-    fontSize: 11,
-    color: colors.surface,
-    fontWeight: "600",
-  },
-  overviewValue: {
-    fontSize: 13,
-    fontWeight: "800",
-    color: colors.surface,
-  },
-  overviewArt: {
-    position: "absolute",
-    right: -18,
-    top: -16,
-    width: 140,
-    height: 120,
-    alignItems: "center",
-    justifyContent: "center",
-    pointerEvents: "none",
-  },
-  overviewBubbleLarge: {
-    position: "absolute",
-    width: 130,
-    height: 110,
-    borderRadius: 35,
-    backgroundColor: "rgba(134, 251, 177, 0.41)",
-    top: 10,
-    right: -20,
-  },
-  overviewBubbleSmall: {
-    position: "absolute",
-    width: 70,
-    height: 70,
-    borderRadius: 35,
-    backgroundColor: "rgba(46, 238, 116, 0.27)",
-    top: 36,
-    right: 54,
-  },
-  segmentedControl: {
-    flexDirection: "row",
-    backgroundColor: colors.surface,
-    borderRadius: radius.pill,
-    padding: 4,
-    borderWidth: 1,
-    borderColor: colors.border,
-    marginBottom: spacing.md,
-    gap: spacing.xs,
-  },
-  segmentedItem: {
-    flex: 1,
-    paddingVertical: 6,
-    borderRadius: radius.pill,
-    alignItems: "center",
-    justifyContent: "center",
-  },
-  segmentedItemActive: {
-    backgroundColor: colors.surfaceSoft,
-    borderWidth: 1,
-    borderColor: colors.border,
-  },
-  segmentedItemPressed: {
-    backgroundColor: colors.surfaceSoft,
-  },
-  segmentedLabel: {
-    fontSize: 12,
-    fontWeight: "600",
-    color: colors.textMuted,
-  },
-  segmentedLabelActive: {
-    color: colors.text,
-  },
-
-  listCard: {
-    backgroundColor: colors.surface,
-    borderRadius: radius.lg,
-    borderWidth: 1,
-    borderColor: colors.border,
-    boxShadow: boxShadows.sm,
-    overflow: "hidden",
-  },
-
-  listContent: {
-    paddingBottom: spacing.xxxl,
-  },
-  listContentEmpty: {
+  listContentGrow: {
     flexGrow: 1,
   },
-  listRow: {
-    flexDirection: "row",
-    alignItems: "flex-start",
-    justifyContent: "space-between",
-    paddingVertical: spacing.sm,
-    paddingHorizontal: spacing.md,
-    borderBottomWidth: 1,
-    borderBottomColor: colors.border,
-    borderLeftWidth: 3,
-    backgroundColor: colors.surface,
-  },
-  listRowPressed: {
-    backgroundColor: colors.surfaceSoft,
-  },
-  listRowLast: {
-    borderBottomWidth: 0,
-  },
-  listLeft: {
-    flexDirection: "row",
-    gap: spacing.sm,
-    flex: 1,
-    paddingRight: spacing.sm,
-  },
-  listThumb: {
-    width: 44,
-    height: 44,
-    borderRadius: radius.md,
-    backgroundColor: colors.surfaceSoft,
+
+  overviewHeroShell: {
+    borderRadius: HERO_RADIUS,
     borderWidth: 1,
-    borderColor: colors.border,
+    boxShadow: boxShadows.md,
+    marginBottom: spacing.md,
   },
-  listInfo: {
-    flex: 1,
+  overviewHero: {
+    borderRadius: HERO_RADIUS,
+    overflow: "hidden",
+    position: "relative",
+    padding: spacing.lg,
   },
-  listName: {
+  heroBlobLarge: {
+    position: "absolute",
+    width: 210,
+    height: 210,
+    borderRadius: 999,
+    right: -80,
+    top: -30,
+    backgroundColor: "rgba(14,149,63,0.09)",
+  },
+  heroBlobSmall: {
+    position: "absolute",
+    width: 160,
+    height: 160,
+    borderRadius: 999,
+    right: -52,
+    bottom: -85,
+    backgroundColor: "rgba(14,149,63,0.12)",
+  },
+  overviewLabel: {
     fontSize: 15,
-    fontWeight: "600",
-    color: colors.text,
-    lineHeight: 20,
+    fontWeight: "800",
+    marginBottom: spacing.md,
   },
-  listLocation: {
-    marginTop: spacing.xs,
-    fontSize: 12,
-    color: colors.textMuted,
+  overviewPlantsCount: {
+    fontSize: 27,
+    fontWeight: "800",
+    marginBottom: spacing.xs,
   },
-  listMicro: {
-    marginTop: spacing.xs,
-    fontSize: 11,
-    color: colors.textMuted,
+  overviewSupport: {
+    fontSize: 15,
+    marginBottom: spacing.md,
   },
-  listStatusRow: {
-    marginTop: spacing.xs,
+  overviewStatsStrip: {
+    backgroundColor: "rgba(255,255,255,0.18)",
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.sm,
     flexDirection: "row",
     alignItems: "center",
-    gap: spacing.xs,
+    justifyContent: "space-between",
+    borderWidth: 1,
+    borderColor: "rgba(0,0,0,0.03)",
   },
-  listStatusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  listStatusText: {
-    fontSize: 11,
-    fontWeight: "600",
-  },
-  quickAction: {
-    minWidth: 44,
-    height: 44,
-    borderRadius: radius.sm,
+  overviewStatItem: {
+    flex: 1,
     alignItems: "center",
     justifyContent: "center",
-    backgroundColor: colors.surface,
-    borderWidth: 1,
-    borderColor: colors.border,
   },
-  quickActionPressed: {
-    backgroundColor: colors.primary,
-    borderColor: colors.primary,
+  overviewStatDot: {
+    width: 9,
+    height: 9,
+    borderRadius: 99,
+    marginBottom: spacing.xs,
   },
-  emptyState: {
-    paddingTop: spacing.lg,
-    alignItems: "flex-start",
-    gap: spacing.xs,
+  overviewStatValue: {
+    fontSize: 18,
+    fontWeight: "800",
   },
-  emptyTitle: {
-    fontSize: 16,
-    fontWeight: "700",
-    color: colors.text,
+  overviewStatLabel: {
+    fontSize: 13,
   },
-  emptyText: {
+  overviewDivider: {
+    width: 1,
+    height: "82%",
+    backgroundColor: "rgba(255,255,255,0.28)",
+  },
+
+  emptyHeroContent: {
+    paddingRight: spacing.xl,
+  },
+  emptyHeroTitle: {
+    fontSize: 22,
+    lineHeight: 28,
+    fontWeight: "800",
+    color: colors.primary,
+    marginBottom: spacing.sm,
+  },
+  emptyHeroText: {
     fontSize: 13,
     color: colors.textMuted,
+    marginBottom: spacing.md,
+    lineHeight: 23,
   },
-  fab: {
+  emptyHeroButton: {
+    alignSelf: "flex-start",
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingHorizontal: spacing.lg,
+    paddingVertical: spacing.md,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.xs,
+  },
+  emptyHeroButtonText: {
+    fontSize: 15,
+    fontWeight: "800",
+    color: colors.background,
+  },
+  emptyHeroArt: {
     position: "absolute",
     right: spacing.lg,
     bottom: spacing.lg,
-    width: 60,
-    height: 60,
-    borderRadius: 30,
+  },
+
+  searchWrap: {
+    flexDirection: "row",
+    alignItems: "center",
+    backgroundColor: colors.surface,
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingHorizontal: spacing.md,
+    paddingVertical: 2,
+    boxShadow: boxShadows.sm,
+    marginBottom: spacing.md,
+  },
+  searchInput: {
+    flex: 1,
+    color: colors.text,
+    fontSize: 15,
+    fontWeight: "600",
+    paddingVertical: spacing.md,
+    paddingLeft: spacing.sm,
+  },
+  searchHelperCard: {
+    backgroundColor: "#f3f4f6",
+    borderRadius: radius.md,
+    borderWidth: 1,
+    borderColor: colors.border,
+    paddingVertical: spacing.md,
+    paddingHorizontal: spacing.md,
+    alignItems: "center",
+    marginBottom: spacing.md,
+  },
+  searchHelperText: {
+    fontSize: 14,
+    color: colors.textMuted,
+    fontWeight: "500",
+  },
+
+  filtersWrap: {
+    flexDirection: "row",
+    flexWrap: "wrap",
+    gap: spacing.sm,
+    marginBottom: spacing.md,
+  },
+  filterPill: {
+    borderRadius: radius.pill,
+    borderWidth: 1,
+    borderColor: "rgba(11,11,11,0.12)",
+    backgroundColor: colors.surface,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.sm,
+  },
+  filterPillActive: {
+    borderColor: "rgba(14,149,63,0.42)",
+    backgroundColor: "#ddf4e5",
+  },
+  filterPillPressed: {
+    opacity: 0.9,
+  },
+  filterPillText: {
+    fontSize: 14,
+    color: "#374151",
+    fontWeight: "600",
+  },
+  filterPillTextActive: {
+    color: colors.primary,
+    fontWeight: "700",
+  },
+
+  plantCard: {
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    padding: spacing.md,
+    marginBottom: spacing.md,
+    boxShadow: boxShadows.sm,
+  },
+  plantCardPressed: {
+    backgroundColor: "#fafafa",
+  },
+  cardHeaderRow: {
+    flexDirection: "row",
+    justifyContent: "space-between",
+    alignItems: "flex-start",
+    gap: spacing.sm,
+  },
+  cardMainInfoWrap: {
+    flex: 1,
+    flexDirection: "row",
+    gap: spacing.md,
+  },
+  thumbnailWrap: {
+    width: 82,
+    height: 116,
+    borderRadius: radius.md,
+    overflow: "hidden",
+    backgroundColor: "#e6efe8",
+  },
+  thumbnailImage: {
+    width: "100%",
+    height: "100%",
+  },
+  thumbnailFallback: {
+    flex: 1,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  cardTextWrap: {
+    flex: 1,
+    paddingTop: spacing.xs,
+  },
+  cardPlantName: {
+    fontSize: 15,
+    color: colors.text,
+    fontWeight: "800",
+    lineHeight: 20,
+    marginBottom: spacing.xs,
+  },
+  cardSpeciesRoom: {
+    fontSize: 14,
+    color: colors.textMuted,
+    marginBottom: spacing.md,
+  },
+  cardMetaRow: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: spacing.sm,
+    marginBottom: spacing.sm,
+  },
+  cardMetaText: {
+    flex: 1,
+    fontSize: 14,
+    color: colors.textMuted,
+    fontWeight: "600",
+  },
+
+  cardRightCol: {
+    alignItems: "flex-end",
+    justifyContent: "space-between",
+    minHeight: 104,
+    paddingTop: spacing.xs,
+  },
+  cardChevron: {
+    marginTop: spacing.md,
+  },
+  statusBadge: {
+    borderRadius: radius.pill,
+    paddingHorizontal: spacing.md,
+    paddingVertical: spacing.xs + 2,
+  },
+  statusBadgeText: {
+    fontSize: 13,
+    fontWeight: "800",
+  },
+
+  emptyStateCard: {
+    marginTop: spacing.sm,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    boxShadow: boxShadows.sm,
+    padding: spacing.lg,
+    alignItems: "center",
+  },
+  emptyStateIllustration: {
+    width: "100%",
+    height: 220,
+    borderRadius: radius.md,
+    backgroundColor: "#f7faf8",
+    alignItems: "center",
+    justifyContent: "center",
+    marginBottom: spacing.lg,
+    position: "relative",
+  },
+  shelfLine: {
+    position: "absolute",
+    left: spacing.xl,
+    right: spacing.xl,
+    bottom: 52,
+    height: 10,
+    borderRadius: radius.sm,
+    backgroundColor: "#efc9a8",
+  },
+  emptyStateTitle: {
+    fontSize: 23,
+    fontWeight: "800",
+    color: colors.text,
+    marginBottom: spacing.sm,
+  },
+  emptyStateBody: {
+    fontSize: 16,
+    color: colors.textMuted,
+    textAlign: "center",
+    lineHeight: 25,
+    marginBottom: spacing.lg,
+  },
+  emptyStateButton: {
+    width: "100%",
+    backgroundColor: colors.primary,
+    borderRadius: radius.md,
+    paddingVertical: spacing.md,
+    alignItems: "center",
+    justifyContent: "center",
+    flexDirection: "row",
+    gap: spacing.sm,
+  },
+  emptyStateButtonText: {
+    fontSize: 15,
+    color: colors.background,
+    fontWeight: "800",
+  },
+
+  emptyResultsWrap: {
+    marginTop: spacing.md,
+    backgroundColor: colors.surface,
+    borderRadius: radius.lg,
+    borderWidth: 1,
+    borderColor: colors.border,
+    boxShadow: boxShadows.sm,
+    padding: spacing.lg,
+    alignItems: "center",
+  },
+  emptyResultsTitle: {
+    fontSize: 18,
+    fontWeight: "700",
+    color: colors.text,
+    marginBottom: spacing.xs,
+  },
+  emptyResultsBody: {
+    fontSize: 14,
+    color: colors.textMuted,
+  },
+
+  fab: {
+    position: "absolute",
+    right: spacing.lg,
+    width: 58,
+    height: 58,
+    borderRadius: 29,
     backgroundColor: colors.primary,
     alignItems: "center",
     justifyContent: "center",
-    shadowColor: "#000",
-    shadowOpacity: 0.35,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 6 },
-    elevation: 10,
-  },
-  fabIcon: {
-    color: colors.background,
-    fontSize: 32,
-    fontWeight: "800",
-    lineHeight: 32,
+    boxShadow: boxShadows.lg,
   },
 });
 
